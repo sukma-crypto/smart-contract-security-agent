@@ -3,7 +3,7 @@
 Catatan serah-terima untuk melanjutkan Recens. Disusun setelah audit kode, bukan
 dari ingatan.
 
-**Ringkasnya:** mesin produknya sudah jadi dan terverifikasi — 238 pengujian
+**Ringkasnya:** mesin produknya sudah jadi dan terverifikasi — 275 pengujian
 lulus, alur delapan langkah berjalan dari buat proyek sampai ekspor DOCX, dan
 tiap proyek kini terkunci ke pemiliknya. Yang belum ada adalah sisa **lapisan
 layanan**: hal-hal yang mengubah mesin menjadi produk yang bisa dipakai orang
@@ -165,6 +165,13 @@ agar hermetis, jadi yang terverifikasi adalah **jalur deterministiknya**.
   `recens/core/stats/narrative.py`. Ia sudah diuji dengan angka buatan, tetapi
   belum pernah diuji terhadap narasi yang benar-benar disusun model. Perhatikan
   angka yang ditulis model dengan ketelitian berbeda dari hasil hitung.
+- **Sudah ditemukan satu penolakan palsu tanpa perlu kunci API:** narasi
+  deterministiknya sendiri tidak lolos penjaganya, karena "R² 0,887 berarti
+  menjelaskan 88,7% variasi" dibaca sebagai angka baru. Bentuk persen kini
+  diterima, dan ada uji yang memastikan draf bawaan selalu lolos penjaganya —
+  pakai uji itu sebagai tolok ukur saat menguji narasi model. Penolakan palsu
+  yang sering terjadi akan membuat penjaganya dimatikan orang, dan justru
+  penjaga inilah jaminan "angka dihitung mesin".
 - **Perkiraan:** 1 hari termasuk perbaikan
 
 ### 11. Parser pedoman baru diuji dengan teks buatan sendiri
@@ -219,8 +226,12 @@ pengguna yang mau membayar.
 Supaya waktu tidak habis di tempat yang salah:
 
 - Mesin statistik — 20 prosedur, diverifikasi terhadap tabel tercetak
-  (`r_table(60) = 0,2542`) dan terhadap koefisien regresi yang ditanam lalu
-  dipulihkan
+  (`r_table(60) = 0,2542`), terhadap koefisien regresi yang ditanam lalu
+  dipulihkan, dan terhadap statsmodels/SciPy pada alur Bab 4 utuh
+- Alur Bab 4: validitas, reliabilitas, asumsi klasik, regresi, uji beda, N-Gain
+  — angka, tabel, narasi, sampai tersisip sebagai Tabel 4.1 dst. di naskah
+- Pemisah desimal koma di seluruh tabel dan kalimat hasil, sementara nilai di
+  `values` tetap bilangan agar penjaga penelusuran angka tetap bekerja
 - Lima pemeriksaan naskah — PUEBI, silang sitasi, konsistensi, kemiripan, batas
 - Perenderan sitasi APA/IEEE/Harvard/Vancouver/gaya kampus
 - Ekspor DOCX dengan penomoran romawi ke arab, field daftar isi, caption

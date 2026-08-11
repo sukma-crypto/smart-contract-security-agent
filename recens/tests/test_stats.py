@@ -14,7 +14,7 @@ import pandas as pd
 import pytest
 
 from recens.core.stats import engine, methodology
-from recens.core.stats.narrative import untraceable_numbers
+from recens.core.stats.narrative import draft_narrative, untraceable_numbers
 
 
 class TestNilaiTabel:
@@ -166,6 +166,151 @@ class TestRegresiDanBeda:
         assert result.values["category"] in ("Rendah", "Sedang", "Tinggi")
         assert result.values["mean_posttest"] > result.values["mean_pretest"]
 
+    def test_selisih_dan_t_berpasangan_bertanda_sama(self, survey_frame):
+        """Tabel yang menampilkan selisih positif di sebelah t negatif akan
+        ditanya penguji, padahal keduanya menggambarkan peningkatan yang sama."""
+        result = engine.ttest_paired(survey_frame, "Pretest", "Posttest")
+        selisih = result.values["mean_difference"]
+        t_hitung = result.values["t_statistic"]
+        assert selisih > 0 and t_hitung > 0, (selisih, t_hitung)
+        assert "Posttest − Pretest" in result.tables[1].columns[0]
+
+
+class TestNGain:
+    """Skor ideal menentukan seluruh hasil N-Gain, jadi ia dijaga sendiri.
+
+    Versi pertama memakai nilai posttest tertinggi yang teramati sebagai skor
+    ideal. Itu salah dalam dua hal sekaligus: penyebutnya mengecil sehingga
+    N-Gain menggelembung, dan angkanya berubah setiap ada responden baru —
+    pembimbing yang menghitung ulang tidak akan menemukan angka yang sama.
+    """
+
+    @pytest.fixture
+    def pretest_posttest(self) -> pd.DataFrame:
+        rng = np.random.default_rng(21)
+        pre = rng.normal(52, 9, 100).round(1)
+        return pd.DataFrame({"Pretest": pre, "Posttest": (pre + rng.normal(16, 6, 100)).round(1)})
+
+    def test_skor_ideal_diterka_dari_skala_baku_bukan_nilai_teramati(self, pretest_posttest):
+        result = engine.ngain(pretest_posttest, "Pretest", "Posttest")
+        teramati = float(pretest_posttest["Posttest"].max())
+        assert teramati < 100, "data uji harus punya nilai tertinggi di bawah 100"
+        assert result.values["ideal_score"] == 100.0
+        assert result.values["ideal_score_assumed"] is True
+
+    def test_terkaan_dinyatakan_terus_terang(self, pretest_posttest):
+        result = engine.ngain(pretest_posttest, "Pretest", "Posttest")
+        assert any("diterka" in w for w in result.warnings)
+        assert "diterka" in result.tables[0].note
+
+        diisi = engine.ngain(pretest_posttest, "Pretest", "Posttest", ideal_score=100)
+        assert diisi.values["ideal_score_assumed"] is False
+        assert not any("diterka" in w for w in diisi.warnings)
+        assert "diisi peneliti" in diisi.tables[0].note
+
+    def test_hasilnya_sama_dengan_hitungan_tangan(self, pretest_posttest):
+        result = engine.ngain(pretest_posttest, "Pretest", "Posttest", ideal_score=100)
+        manual = (
+            (pretest_posttest["Posttest"] - pretest_posttest["Pretest"])
+            / (100 - pretest_posttest["Pretest"])
+        ).mean()
+        assert result.values["mean_ngain"] == round(manual, 3)
+
+    @pytest.mark.parametrize(
+        "maksimum,harapan",
+        [(3.8, 4.0), (4.6, 5.0), (9.2, 10.0), (88.0, 100.0), (100.0, 100.0), (132.0, 140.0)],
+    )
+    def test_skala_baku_dikenali(self, maksimum, harapan):
+        assert engine.infer_ideal_score(maksimum) == harapan
+
+    def test_skor_ideal_di_bawah_data_ditolak(self, pretest_posttest):
+        with pytest.raises(engine.AnalysisError, match="lebih kecil daripada nilai tertinggi"):
+            engine.ngain(pretest_posttest, "Pretest", "Posttest", ideal_score=50)
+
+    def test_responden_berpenyebut_nol_dikeluarkan_dan_dilaporkan(self):
+        """Responden yang skor pretest-nya sudah menyentuh skor ideal tidak
+        punya ruang untuk meningkat, sehingga N-Gain-nya tak terdefinisi.
+        Mengeluarkannya diam-diam membuat N tidak cocok dengan jumlah
+        responden yang ditulis di Bab 3, jadi jumlahnya ikut dilaporkan."""
+        frame = pd.DataFrame(
+            {"Pretest": [40.0, 60.0, 100.0, 100.0], "Posttest": [70.0, 80.0, 100.0, 95.0]}
+        )
+        result = engine.ngain(frame, "Pretest", "Posttest", ideal_score=100)
+        assert result.values["n"] == 2
+        assert result.values["excluded"] == 2
+        assert any("tidak diikutkan" in w for w in result.warnings)
+        assert result.values["mean_ngain"] == round(((30 / 60) + (20 / 40)) / 2, 3)
+
+    def test_nilai_sempurna_tidak_membatalkan_seluruh_analisis(self):
+        """Skor ideal yang sama persis dengan nilai tertinggi itu wajar."""
+        frame = pd.DataFrame({"Pretest": [40.0, 55.0, 62.0], "Posttest": [100.0, 80.0, 88.0]})
+        result = engine.ngain(frame, "Pretest", "Posttest", ideal_score=100)
+        assert result.values["n"] == 3
+        assert result.values["excluded"] == 0
+
+
+class TestKolomKembar:
+    """Memilih kolom yang sama dua kali harus ditolak, bukan memecahkan server.
+
+    Dua daftar kolom berdampingan pada satu formulir membuat kekeliruan ini
+    wajar terjadi — dan antarmuka sempat menjadikannya bawaan. Enam uji
+    menjawab 500 karena ``frame[[a, a]]`` menghasilkan kolom kembar, sehingga
+    ``data[a]`` mengembalikan DataFrame alih-alih Series.
+    """
+
+    @pytest.fixture
+    def frame(self) -> pd.DataFrame:
+        rng = np.random.default_rng(1)
+        return pd.DataFrame(
+            {
+                "A": rng.normal(50, 10, 40).round(1),
+                "B": rng.normal(60, 9, 40).round(1),
+                "G": rng.choice(["x", "y"], 40),
+            }
+        )
+
+    @pytest.mark.parametrize(
+        "jalankan",
+        [
+            pytest.param(lambda f: engine.crosstab(f, "A", "A"), id="crosstab"),
+            pytest.param(lambda f: engine.ttest_independent(f, "A", "A"), id="uji_t_bebas"),
+            pytest.param(lambda f: engine.ttest_paired(f, "A", "A"), id="uji_t_berpasangan"),
+            pytest.param(lambda f: engine.ngain(f, "A", "A"), id="ngain"),
+            pytest.param(lambda f: engine.correlation(f, ["A", "A"]), id="korelasi"),
+            pytest.param(lambda f: engine.validity_test(f, ["A", "A"]), id="validitas"),
+            pytest.param(lambda f: engine.reliability_test(f, ["A", "A"]), id="reliabilitas"),
+            pytest.param(lambda f: engine.multicollinearity(f, ["A", "A"]), id="multikolinearitas"),
+            pytest.param(lambda f: engine.regression(f, "A", ["A"]), id="regresi_y_di_x"),
+            pytest.param(lambda f: engine.regression(f, "A", ["B", "B"]), id="regresi_x_kembar"),
+            pytest.param(
+                lambda f: engine.heteroscedasticity(f, "A", ["A"]), id="heteroskedastisitas"
+            ),
+            pytest.param(
+                lambda f: engine.nonparametric(f, test="wilcoxon", value="A", second="A"),
+                id="wilcoxon",
+            ),
+            pytest.param(
+                lambda f: engine.nonparametric(f, test="mann_whitney", value="A", group="A"),
+                id="mann_whitney",
+            ),
+            pytest.param(
+                lambda f: engine.nonparametric(f, test="kruskal", value="A", group="A"),
+                id="kruskal",
+            ),
+        ],
+    )
+    def test_ditolak_dengan_kalimat_yang_menuntun(self, frame, jalankan):
+        with pytest.raises(engine.AnalysisError) as caught:
+            jalankan(frame)
+        pesan = str(caught.value)
+        assert "A" in pesan or "B" in pesan, pesan
+        assert any(kata in pesan for kata in ("Pilih kolom", "satu kali", "dirinya sendiri"))
+
+    def test_variabel_terikat_tidak_boleh_jadi_variabel_bebas(self, frame):
+        """R² akan selalu 1 dan tabelnya tidak berarti apa pun."""
+        with pytest.raises(engine.AnalysisError, match="dirinya sendiri"):
+            engine.regression(frame, "A", ["A", "B"])
+
 
 class TestPLS:
     def test_ave_dan_cr_dihitung_dari_loading(self):
@@ -215,6 +360,77 @@ class TestPenelusuranAngka:
         mean = result.values["Usia"]["mean"]
         assert untraceable_numbers(f"Rata-rata usia {mean}", result) == []
         assert untraceable_numbers(f"Rata-rata usia {str(mean).replace('.', ',')}", result) == []
+
+    def test_bentuk_persen_bukan_angka_baru(self, survey_frame):
+        """"R² 0,887 berarti menjelaskan 88,7% variasi" adalah satu angka yang
+        sama dinyatakan dua kali — dan begitulah orang menulis Bab 4. Penolakan
+        palsu yang sering terjadi akan membuat penjaganya dimatikan orang."""
+        result = engine.regression(survey_frame, "Kinerja", ["Motivasi"])
+        r2 = result.values["r_squared"]
+        narasi = f"Variabel bebas menjelaskan {str(round(r2 * 100, 1)).replace('.', ',')}% variasi."
+        assert untraceable_numbers(narasi, result) == []
+
+    def test_narasi_deterministik_lolos_penjaganya_sendiri(self, survey_frame):
+        """Draf bawaan adalah tolok ukur yang harus dipenuhi narasi model.
+        Bila draf itu sendiri tidak lolos, ambangnya keliru — bukan narasinya."""
+        for result in (
+            engine.regression(survey_frame, "Kinerja", ["Motivasi", "Usia"]),
+            engine.reliability_test(survey_frame, [f"X1.{i}" for i in range(1, 6)]),
+            engine.ttest_paired(survey_frame, "Pretest", "Posttest"),
+            engine.ngain(survey_frame, "Pretest", "Posttest", ideal_score=100),
+        ):
+            sisa = untraceable_numbers(draft_narrative(result), result)
+            assert sisa == [], f"{result.method}: {sisa}"
+
+    def test_angka_karangan_tetap_tertangkap_setelah_bentuk_persen_diterima(self, survey_frame):
+        result = engine.regression(survey_frame, "Kinerja", ["Motivasi"])
+        narasi = draft_narrative(result).replace(
+            str(result.values["r_squared"]).replace(".", ","), "0,995"
+        )
+        assert 0.995 in untraceable_numbers(narasi, result)
+
+
+class TestPemisahDesimal:
+    """Skripsi Indonesia memakai koma desimal; tabel bertitik dikembalikan pembimbing."""
+
+    def test_sel_tabel_memakai_koma(self, survey_frame):
+        rendered = engine.regression(survey_frame, "Kinerja", ["Motivasi"]).to_dict()
+        angka = [c for row in rendered["tables"][0]["rows"] for c in row if isinstance(c, str)]
+        assert angka and all("." not in c for c in angka), angka
+        assert any("," in c for c in angka), angka
+
+    def test_kalimat_hasil_memakai_koma(self, survey_frame):
+        rendered = engine.reliability_test(
+            survey_frame, [f"X1.{i}" for i in range(1, 6)]
+        ).to_dict()
+        assert any("," in f for f in rendered["findings"])
+
+    def test_nama_butir_tidak_ikut_diubah(self, survey_frame):
+        """"X1.1" adalah nama butir, bukan bilangan desimal."""
+        items = [f"X1.{i}" for i in range(1, 6)]
+        rendered = engine.validity_test(survey_frame, items).to_dict()
+        assert [row[0] for row in rendered["tables"][0]["rows"]] == items
+
+    def test_angka_di_values_tetap_bilangan(self, survey_frame):
+        """Penjaga penelusuran membandingkan bilangan, bukan teks — dan angka
+        yang sudah menjadi teks tidak bisa dihitung ulang siapa pun."""
+        rendered = engine.regression(survey_frame, "Kinerja", ["Motivasi"]).to_dict()
+        assert isinstance(rendered["values"]["r_squared"], float)
+        assert isinstance(rendered["values"]["Motivasi"]["coefficient"], float)
+
+    def test_nilai_p_ditulis_sama_dengan_tabelnya(self, survey_frame):
+        """"signifikansi 0,0" salah: nilai p tidak pernah tepat nol, dan tabel
+        di sebelahnya sudah menulis "< 0,001"."""
+        rendered = engine.regression(survey_frame, "Kinerja", ["Motivasi"]).to_dict()
+        kalimat = " ".join(rendered["findings"])
+        assert "signifikansi 0,0," not in kalimat and "signifikansi 0,0 " not in kalimat
+        assert "< 0,001" in kalimat
+
+    def test_persamaan_regresi_memberi_spasi_antara_koefisien_dan_variabel(self, survey_frame):
+        rendered = engine.regression(survey_frame, "Kinerja", ["Motivasi"]).to_dict()
+        persamaan = next(f for f in rendered["findings"] if "Persamaan regresi" in f)
+        assert " Motivasi" in persamaan and "Motivasi" in persamaan
+        assert not any(f"{d}Motivasi" in persamaan for d in "0123456789")
 
 
 class TestPemanduMetodologi:

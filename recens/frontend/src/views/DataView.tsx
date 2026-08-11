@@ -26,6 +26,11 @@ interface MethodInfo {
   key: string;
   label: string;
   params: string[];
+  /** Nama parameter dalam bahasa Indonesia — mesinnya berbahasa Inggris. */
+  param_labels: Record<string, string>;
+  param_hints: Record<string, string>;
+  number_params: string[];
+  optional_params: string[];
 }
 
 interface MethodsResponse {
@@ -197,11 +202,25 @@ function RunPanel({
   const info = methods.find((m) => m.key === method)!;
   const columns = datasets.find((d) => d.id === Number(datasetId))?.meta_json.columns ?? [];
 
+  /**
+   * Kolom bawaan untuk tiap isian, berurutan.
+   *
+   * Sebelumnya seluruh daftar kolom jatuh ke `columns[0]`, sehingga "Skor
+   * pretest" dan "Skor posttest" sama-sama terisi kolom pertama dan sekali
+   * klik Jalankan menghasilkan uji sebuah kolom terhadap dirinya sendiri.
+   */
+  const columnParams = info.params.filter(
+    (p) => !LIST_PARAMS.includes(p) && !JSON_PARAMS.includes(p) && !info.number_params.includes(p),
+  );
+  const defaultFor = (param: string) =>
+    columns[Math.min(columnParams.indexOf(param), columns.length - 1)] ?? "";
+
   const execute = () =>
     withBusy("run", async () => {
       const payload: Record<string, unknown> = {};
       for (const key of info.params) {
-        const raw = params[key] ?? "";
+        const raw = (params[key] ?? "").trim();
+        if (info.optional_params.includes(key) && !raw) continue;
         if (LIST_PARAMS.includes(key)) {
           payload[key] = raw.split(",").map((v) => v.trim()).filter(Boolean);
         } else if (JSON_PARAMS.includes(key)) {
@@ -210,8 +229,10 @@ function RunPanel({
           } catch {
             payload[key] = key === "loadings" ? {} : [];
           }
+        } else if (info.number_params.includes(key)) {
+          payload[key] = Number(raw);
         } else {
-          payload[key] = raw || columns[0];
+          payload[key] = raw || defaultFor(key);
         }
       }
       const response = await run(() =>
@@ -257,11 +278,16 @@ function RunPanel({
 
         <Row className="mt-3">
           {info.params.map((param) => {
+            const label = info.param_labels?.[param] ?? param;
+            const hint = info.param_hints?.[param];
+            const optional = info.optional_params?.includes(param);
+
             if (LIST_PARAMS.includes(param)) {
               return (
                 <Field
                   key={param}
-                  label={`${param} (pisahkan dengan koma)`}
+                  label={`${label} — pisahkan dengan koma`}
+                  hint={hint}
                   className="min-w-56 flex-1"
                 >
                   <Input
@@ -274,7 +300,12 @@ function RunPanel({
             }
             if (JSON_PARAMS.includes(param)) {
               return (
-                <Field key={param} label={`${param} (JSON dari output perangkat)`} className="w-full">
+                <Field
+                  key={param}
+                  label={`${label} — JSON dari output perangkat`}
+                  hint={hint}
+                  className="w-full"
+                >
                   <Textarea
                     value={params[param] ?? ""}
                     onChange={(e) => setParams({ ...params, [param]: e.target.value })}
@@ -287,11 +318,31 @@ function RunPanel({
                 </Field>
               );
             }
+            if (info.number_params?.includes(param)) {
+              // Isian berupa angka, bukan nama kolom. Menyodorkan daftar kolom
+              // di sini membuat parameter seperti skor ideal mustahil diisi.
+              return (
+                <Field
+                  key={param}
+                  label={optional ? `${label} (boleh dikosongkan)` : label}
+                  hint={hint}
+                  className="min-w-56"
+                >
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    value={params[param] ?? ""}
+                    onChange={(e) => setParams({ ...params, [param]: e.target.value })}
+                    placeholder="mis. 100"
+                  />
+                </Field>
+              );
+            }
             return (
-              <Field key={param} label={param}>
+              <Field key={param} label={label} hint={hint}>
                 <SimpleSelect
                   className="w-44"
-                  value={params[param] ?? columns[0] ?? ""}
+                  value={params[param] ?? defaultFor(param)}
                   onValueChange={(value) => setParams({ ...params, [param]: value })}
                   options={columns.map((c) => ({ value: c, label: c }))}
                 />

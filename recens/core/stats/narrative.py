@@ -11,25 +11,16 @@ from __future__ import annotations
 import math
 import re
 
-from .engine import AnalysisResult, Table
+from .engine import AnalysisResult, Table, format_id, to_indonesian_decimals  # noqa: F401
 
 #: Ambang dan konstanta yang lazim ditulis di kalimat pembahasan, bukan hasil hitung.
 CONVENTIONAL_NUMBERS = {
     0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 100.0,
-    0.05, 0.01, 0.1, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,
+    0.05, 0.01, 0.001, 0.1, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,
     1.5, 1.96, 2.5, 30.0, 50.0, 95.0, 99.0,
 }
 
 NUMBER_TOKEN = re.compile(r"(?<![\w.,])(-?\d+(?:[.,]\d+)?)(?![\w])")
-
-
-def format_id(value: float | int | None, digits: int = 3) -> str:
-    """Format angka dengan koma desimal sesuai kaidah penulisan Indonesia."""
-    if value is None:
-        return "-"
-    if isinstance(value, int) or (isinstance(value, float) and value.is_integer()):
-        return f"{int(value):,}".replace(",", ".")
-    return f"{value:.{digits}f}".replace(".", ",")
 
 
 def parse_numbers(text: str) -> list[float]:
@@ -69,6 +60,13 @@ def untraceable_numbers(
     for value in result.params.values():
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             computed.add(round(float(value), 6))
+
+    # Bentuk persen dari tiap angka ikut diterima. "R² sebesar 0,887 yang berarti
+    # menjelaskan 88,7% variasi" adalah satu angka yang sama dinyatakan dua kali,
+    # bukan angka baru — dan begitulah cara orang menulis Bab 4. Tanpa ini
+    # penjaga menolak narasi yang justru benar, dan penolakan palsu yang sering
+    # terjadi akan membuat penjaganya dimatikan orang.
+    computed |= {round(candidate * 100, 6) for candidate in tuple(computed)}
 
     flagged = []
     for number, decimals in parse_numbers_with_precision(text):
@@ -155,7 +153,10 @@ def draft_narrative(result: AnalysisResult) -> str:
         parts.append("Ringkasan pemenuhan asumsi: " + "; ".join(result.assumptions) + ".")
     if result.warnings:
         parts.append("Catatan: " + " ".join(result.warnings))
-    return " ".join(parts)
+    # Narasi masuk ke naskah berdampingan dengan tabelnya, jadi pemisah
+    # desimalnya harus sama. Diterapkan pada teks jadi, bukan pada angkanya,
+    # sehingga penjaga penelusuran tetap membandingkan bilangan sungguhan.
+    return to_indonesian_decimals(" ".join(parts))
 
 
 def assumption_summary(results: list[AnalysisResult]) -> dict:

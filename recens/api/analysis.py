@@ -30,6 +30,47 @@ from .deps import (
 router = APIRouter(tags=["analisis"])
 
 #: Uji yang tersedia beserta parameter yang diminta.
+#: Nama parameter ditulis dalam bahasa Inggris di mesin statistik, tetapi yang
+#: memakainya adalah mahasiswa yang sedang mengerjakan Bab 4. "predictors" dan
+#: "dependent" di layar tidak menolong siapa pun; yang dikenal di ruang sidang
+#: adalah "variabel bebas" dan "variabel terikat".
+PARAM_LABELS = {
+    "columns": "Variabel yang dianalisis",
+    "column": "Variabel",
+    "row": "Variabel baris",
+    "items": "Butir kuesioner",
+    "predictors": "Variabel bebas (X)",
+    "dependent": "Variabel terikat (Y)",
+    "value": "Variabel yang diukur",
+    "group": "Variabel pengelompok",
+    "before": "Skor sebelum (pretest)",
+    "after": "Skor sesudah (posttest)",
+    "second": "Pengukuran kedua",
+    "pretest": "Skor pretest",
+    "posttest": "Skor posttest",
+    "ideal_score": "Skor maksimum instrumen",
+    "ratings": "Penilaian para ahli",
+    "loadings": "Outer loading per konstruk",
+    "paths": "Koefisien jalur antar-konstruk",
+}
+
+#: Parameter berupa angka, bukan nama kolom. Antarmuka perlu tahu bedanya agar
+#: tidak menyodorkan daftar kolom untuk isian yang seharusnya diketik.
+NUMBER_PARAMS = {"ideal_score"}
+
+#: Parameter yang boleh dikosongkan.
+OPTIONAL_PARAMS = {"ideal_score"}
+
+PARAM_HINTS = {
+    "ideal_score": (
+        "Skor tertinggi yang mungkin dicapai instrumen — 100 untuk tes berskala "
+        "seratus, 5 untuk angket Likert lima titik. Bila dikosongkan, nilainya "
+        "diterka dari skala data dan hasilnya diberi peringatan."
+    ),
+    "items": "Butir pembentuk satu variabel, misalnya X1.1 sampai X1.5.",
+    "predictors": "Boleh lebih dari satu; pisahkan dengan koma.",
+}
+
 METHODS = {
     "descriptive": {"label": "Statistik deskriptif", "params": ["columns"]},
     "frequency": {"label": "Distribusi frekuensi", "params": ["column"]},
@@ -50,7 +91,7 @@ METHODS = {
     "mann_whitney": {"label": "Uji Mann-Whitney U", "params": ["value", "group"]},
     "wilcoxon": {"label": "Uji Wilcoxon", "params": ["value", "second"]},
     "kruskal": {"label": "Uji Kruskal-Wallis", "params": ["value", "group"]},
-    "ngain": {"label": "Uji N-Gain", "params": ["pretest", "posttest"]},
+    "ngain": {"label": "Uji N-Gain", "params": ["pretest", "posttest", "ideal_score"]},
     "aiken_v": {"label": "Validasi ahli (Aiken's V)", "params": ["ratings"]},
     "pls_measurement": {"label": "Model pengukuran PLS", "params": ["loadings"]},
     "pls_structural": {"label": "Model struktural PLS", "params": ["paths"]},
@@ -111,7 +152,17 @@ class ThemeRequest(BaseModel):
 @router.get("/analysis/methods")
 def list_methods() -> dict:
     return {
-        "methods": [{"key": k, **v} for k, v in METHODS.items()],
+        "methods": [
+            {
+                "key": key,
+                **spec,
+                "param_labels": {p: PARAM_LABELS.get(p, p) for p in spec["params"]},
+                "param_hints": {p: PARAM_HINTS[p] for p in spec["params"] if p in PARAM_HINTS},
+                "number_params": [p for p in spec["params"] if p in NUMBER_PARAMS],
+                "optional_params": [p for p in spec["params"] if p in OPTIONAL_PARAMS],
+            }
+            for key, spec in METHODS.items()
+        ],
         "boundary": (
             "Recens mengolah dan menjelaskan data yang benar-benar diunggah pengguna. "
             "Sistem tidak mengarang data, tidak memanipulasi hasil agar hipotesis "
@@ -274,7 +325,14 @@ def run_analysis(
 def _dispatch(
     conn: sqlite3.Connection, project_id: int, payload: RunAnalysis
 ) -> engine.AnalysisResult:
-    params = dict(payload.params)
+    # Isian pilihan yang dibiarkan kosong dikirim antarmuka sebagai string
+    # kosong atau null. Diteruskan apa adanya, keduanya akan menabrak
+    # perhitungan; yang dimaksud pengguna adalah "tidak diisi".
+    params = {
+        key: value
+        for key, value in payload.params.items()
+        if not (key in OPTIONAL_PARAMS and value in (None, ""))
+    }
     method = payload.method
 
     # Uji yang bekerja atas nilai yang ditempel, bukan berkas data.

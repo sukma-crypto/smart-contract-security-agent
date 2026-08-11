@@ -14,6 +14,7 @@ Dua hal yang dijaga modul ini:
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
@@ -38,7 +39,17 @@ class Table:
     note: str = ""
 
     def to_dict(self) -> dict:
-        return {"title": self.title, "columns": self.columns, "rows": self.rows, "note": self.note}
+        """Bentuk tabel yang siap ditampilkan dan diekspor.
+
+        Angka diformat berkoma di sini, bukan di ``rows``, agar ``all_numbers``
+        tetap membaca bilangan sungguhan untuk penjaga penelusuran angka.
+        """
+        return {
+            "title": self.title,
+            "columns": self.columns,
+            "rows": [[format_id(cell) for cell in row] for row in self.rows],
+            "note": to_indonesian_decimals(self.note),
+        }
 
 
 @dataclass
@@ -61,9 +72,9 @@ class AnalysisResult:
             "params": self.params,
             "tables": [t.to_dict() for t in self.tables],
             "values": self.values,
-            "findings": self.findings,
-            "assumptions": self.assumptions,
-            "warnings": self.warnings,
+            "findings": [to_indonesian_decimals(f) for f in self.findings],
+            "assumptions": [to_indonesian_decimals(a) for a in self.assumptions],
+            "warnings": [to_indonesian_decimals(w) for w in self.warnings],
         }
 
     def all_numbers(self) -> set[float]:
@@ -96,6 +107,41 @@ class AnalysisResult:
 # --- Pembantu ----------------------------------------------------------------
 
 
+#: Angka di dalam kalimat, bukan bagian dari nama kolom. Lookbehind-nya menahan
+#: "X1.1" agar tidak ikut diubah menjadi "X1,1" — nama butir kuesioner berbentuk
+#: seperti itu ada di hampir setiap kuesioner.
+_ANGKA_DALAM_KALIMAT = re.compile(r"(?<![\w.,])(-?\d+)\.(\d+)(?![\w])")
+
+
+def format_id(value: Any, digits: int = 3) -> Any:
+    """Format satu angka dengan koma desimal sesuai kaidah penulisan Indonesia.
+
+    Nilai yang bukan angka dikembalikan apa adanya, sehingga pemformat ini aman
+    dipakai pada sel tabel yang isinya campuran angka dan keterangan.
+    """
+    if value is None or isinstance(value, bool) or isinstance(value, str):
+        return value
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return value
+    if math.isnan(number) or math.isinf(number):
+        return value
+    if number.is_integer() and abs(number) < 1e15:
+        return f"{int(number):,}".replace(",", ".")
+    return f"{number:.{digits}f}".replace(".", ",")
+
+
+def to_indonesian_decimals(text: str) -> str:
+    """Ubah titik desimal menjadi koma di dalam kalimat hasil.
+
+    Diterapkan pada teks, bukan pada angkanya, supaya nilai di ``values`` tetap
+    berupa bilangan — penjaga penelusuran angka membandingkan angka narasi
+    dengan angka hasil hitung, dan ia sudah menerima kedua bentuk pemisah.
+    """
+    return _ANGKA_DALAM_KALIMAT.sub(r"\1,\2", text or "")
+
+
 def _r(value: Any, digits: int = 3) -> Any:
     if value is None:
         return None
@@ -116,6 +162,39 @@ def _require_columns(frame: pd.DataFrame, columns: Iterable[str]) -> list[str]:
             f"Kolom yang tersedia: {', '.join(map(str, frame.columns))}."
         )
     return list(columns)
+
+
+def _require_distinct(**named: str) -> None:
+    """Tolak dua peran yang diisi kolom yang sama.
+
+    Bukan sekadar demi pesan yang lebih baik. ``frame[[a, a]]`` menghasilkan
+    kolom kembar, sehingga ``data[a]`` mengembalikan DataFrame alih-alih Series
+    dan perhitungannya pecah dengan galat pandas yang tidak berarti apa-apa
+    bagi mahasiswa — enam uji sempat menjawab 500 karena ini. Memilih kolom
+    yang sama pada dua daftar berdampingan adalah kekeliruan yang wajar, jadi
+    jawabannya harus menyebut apa yang keliru.
+    """
+    seen: dict[str, str] = {}
+    for role, column in named.items():
+        if column in seen:
+            raise AnalysisError(
+                f"Kolom '{column}' dipilih untuk dua hal sekaligus "
+                f"({seen[column].replace('_', ' ')} dan {role.replace('_', ' ')}). "
+                f"Pilih kolom yang berbeda untuk masing-masing."
+            )
+        seen[column] = role
+
+
+def _require_unique(role: str, columns: Iterable[str]) -> list[str]:
+    """Tolak kolom yang disebut dua kali dalam satu daftar."""
+    columns = list(columns)
+    duplicates = sorted({c for c in columns if columns.count(c) > 1})
+    if duplicates:
+        raise AnalysisError(
+            f"{role} memuat kolom yang sama lebih dari sekali: "
+            f"{', '.join(duplicates)}. Sebutkan tiap kolom satu kali saja."
+        )
+    return columns
 
 
 def _numeric(frame: pd.DataFrame, columns: Iterable[str]) -> pd.DataFrame:
@@ -261,6 +340,7 @@ def frequency(frame: pd.DataFrame, column: str) -> AnalysisResult:
 def crosstab(frame: pd.DataFrame, row: str, column: str) -> AnalysisResult:
     """Tabulasi silang dua variabel beserta uji chi-square."""
     _require_columns(frame, [row, column])
+    _require_distinct(variabel_baris=row, variabel_kolom=column)
     table = pd.crosstab(frame[row], frame[column])
     if table.size == 0:
         raise AnalysisError("Tabulasi silang kosong.")
@@ -384,7 +464,7 @@ def validity_test(
     Reliability Analysis SPSS; bawaannya memakai korelasi butir dengan skor
     total, konvensi yang paling umum dipakai pada skripsi.
     """
-    items = _require_columns(frame, items)
+    items = _require_unique("Daftar butir", _require_columns(frame, items))
     data = _numeric(frame, items).dropna()
     n = int(data.shape[0])
     if n < 3:
@@ -522,7 +602,7 @@ def reliability_test(
     frame: pd.DataFrame, items: list[str], threshold: float = 0.6
 ) -> AnalysisResult:
     """Uji reliabilitas Cronbach's Alpha beserta alpha bila butir dihapus."""
-    items = _require_columns(frame, items)
+    items = _require_unique("Daftar butir", _require_columns(frame, items))
     data = _numeric(frame, items).dropna()
     if data.shape[0] < 3 or data.shape[1] < 2:
         raise AnalysisError("Uji reliabilitas memerlukan minimal 2 butir dan 3 responden.")
@@ -663,7 +743,7 @@ def _lilliefors(series: pd.Series) -> tuple[float, float]:
 
 def multicollinearity(frame: pd.DataFrame, predictors: list[str]) -> AnalysisResult:
     """Uji multikolinearitas lewat VIF dan tolerance."""
-    predictors = _require_columns(frame, predictors)
+    predictors = _require_unique("Daftar variabel bebas", _require_columns(frame, predictors))
     if len(predictors) < 2:
         raise AnalysisError("Uji multikolinearitas memerlukan minimal dua variabel bebas.")
     data = _numeric(frame, predictors).dropna()
@@ -718,6 +798,12 @@ def heteroscedasticity(
 ) -> AnalysisResult:
     """Uji heteroskedastisitas dengan metode Glejser atau Breusch-Pagan."""
     _require_columns(frame, [dependent, *predictors])
+    predictors = _require_unique("Daftar variabel bebas", predictors)
+    if dependent in predictors:
+        raise AnalysisError(
+            f"'{dependent}' dipakai sebagai variabel terikat sekaligus variabel bebas. "
+            f"Sebuah variabel tidak dapat menjelaskan dirinya sendiri."
+        )
     data = _numeric(frame, [dependent, *predictors]).dropna()
 
     import statsmodels.api as sm
@@ -809,7 +895,7 @@ def correlation(
     frame: pd.DataFrame, columns: list[str], method: str = "pearson"
 ) -> AnalysisResult:
     """Matriks korelasi Pearson atau Spearman beserta signifikansinya."""
-    columns = _require_columns(frame, columns)
+    columns = _require_unique("Daftar variabel", _require_columns(frame, columns))
     data = _numeric(frame, columns).dropna()
     n = int(data.shape[0])
     if n < 3:
@@ -869,6 +955,13 @@ def regression(
 ) -> AnalysisResult:
     """Regresi linear sederhana maupun berganda dengan OLS."""
     _require_columns(frame, [dependent, *predictors])
+    predictors = _require_unique("Daftar variabel bebas", predictors)
+    if dependent in predictors:
+        raise AnalysisError(
+            f"'{dependent}' dipakai sebagai variabel terikat sekaligus variabel bebas. "
+            f"Sebuah variabel tidak dapat menjelaskan dirinya sendiri — R² akan "
+            f"selalu bernilai 1 dan hasilnya tidak berarti apa pun."
+        )
     data = _numeric(frame, [dependent, *predictors]).dropna()
     n = int(data.shape[0])
     if n <= len(predictors) + 1:
@@ -936,7 +1029,10 @@ def regression(
     equation = f"{dependent} = {_r(model.params['const'])}"
     for predictor in predictors:
         coefficient = float(model.params[predictor])
-        equation += f" {'+' if coefficient >= 0 else '−'} {_r(abs(coefficient))}{predictor}"
+        # Spasi antara koefisien dan nama variabel: "2,061 Motivasi", bukan
+        # "2,061Motivasi". Selain lebih terbaca, tanpa spasi angkanya menempel
+        # pada huruf sehingga pemformat desimal tidak mengenalinya sebagai angka.
+        equation += f" {'+' if coefficient >= 0 else '−'} {_r(abs(coefficient))} {predictor}"
 
     f_significant = bool(float(model.f_pvalue) < alpha)
     findings = [
@@ -952,8 +1048,12 @@ def regression(
     for predictor in predictors:
         info = values[predictor]
         findings.append(
+            # Nilai p ditulis dengan pelabel yang sama seperti di tabel. Memakai
+            # angka bulatnya menghasilkan "signifikansi 0,0" — nilai p tidak
+            # pernah tepat nol, dan tabel di sebelahnya menulis "< 0,001".
             f"Variabel {predictor} memiliki t hitung {info['t_value']} "
-            f"(t tabel = {_r(t_critical)}) dengan signifikansi {info['p_value']}, "
+            f"(t tabel = {_r(t_critical)}) dengan signifikansi "
+            f"{_p_label(info['p_value'])}, "
             f"sehingga secara parsial {'berpengaruh' if info['significant'] else 'tidak berpengaruh'} "
             f"terhadap {dependent}."
         )
@@ -1012,6 +1112,7 @@ def ttest_independent(
 ) -> AnalysisResult:
     """Uji beda dua kelompok bebas, dengan uji Levene sebagai penentu varian."""
     _require_columns(frame, [value, group])
+    _require_distinct(variabel_yang_diukur=value, variabel_pengelompok=group)
     data = frame[[value, group]].dropna()
     data[value] = pd.to_numeric(data[value], errors="coerce")
     data = data.dropna()
@@ -1104,12 +1205,18 @@ def ttest_paired(
 ) -> AnalysisResult:
     """Uji t berpasangan — dipakai pada rancangan pretest-posttest."""
     _require_columns(frame, [before, after])
+    _require_distinct(pengukuran_sebelum=before, pengukuran_sesudah=after)
     data = _numeric(frame, [before, after]).dropna()
     n = int(data.shape[0])
     if n < 3:
         raise AnalysisError("Uji t berpasangan memerlukan minimal 3 pasangan data.")
 
-    t_stat, p_value = sps.ttest_rel(data[before], data[after])
+    # Arah pengurangan disamakan dengan arah statistik ujinya. Sebelumnya
+    # selisih dihitung `after - before` sementara t dihitung dari
+    # `(before, after)`, sehingga tabel menampilkan selisih rata-rata positif
+    # bersebelahan dengan t hitung negatif. Itu tepat menjadi bahan pertanyaan
+    # penguji, padahal keduanya menggambarkan peningkatan yang sama.
+    t_stat, p_value = sps.ttest_rel(data[after], data[before])
     difference = data[after] - data[before]
     cohens_d = difference.mean() / difference.std(ddof=1) if difference.std(ddof=1) else float("nan")
     significant = bool(p_value < alpha)
@@ -1129,8 +1236,8 @@ def ttest_paired(
             ),
             Table(
                 title="Hasil Uji t Berpasangan",
-                columns=["Selisih Rata-rata", "Std. Deviasi", "t hitung", "df",
-                         "Sig. (2-tailed)", "Cohen's d", "Keterangan"],
+                columns=[f"Selisih Rata-rata ({after} − {before})", "Std. Deviasi",
+                         "t hitung", "df", "Sig. (2-tailed)", "Cohen's d", "Keterangan"],
                 rows=[[_r(difference.mean()), _r(difference.std(ddof=1)), _r(t_stat), n - 1,
                        _p_label(p_value), _r(cohens_d),
                        "Berbeda signifikan" if significant else "Tidak berbeda signifikan"]],
@@ -1277,6 +1384,7 @@ def nonparametric(
 
     if test == "wilcoxon":
         _require_columns(frame, [value, second or ""])
+        _require_distinct(pengukuran_pertama=value, pengukuran_kedua=second or "")
         data = _numeric(frame, [value, second]).dropna()
         statistic, p_value = sps.wilcoxon(data[value], data[second])
         detail = Table(
@@ -1291,6 +1399,7 @@ def nonparametric(
         }
     else:
         _require_columns(frame, [value, group or ""])
+        _require_distinct(variabel_yang_diukur=value, variabel_pengelompok=group or "")
         data = frame[[value, group]].dropna()
         data[value] = pd.to_numeric(data[value], errors="coerce")
         data = data.dropna()
@@ -1348,19 +1457,73 @@ def nonparametric(
 # --- Eksperimen & R&D --------------------------------------------------------
 
 
+#: Skor maksimum instrumen yang lazim dipakai penelitian pendidikan Indonesia:
+#: tes berskala 100, tes berskala 10, dan angket Likert 1–5 atau 1–4.
+STANDARD_IDEAL_SCORES = (4.0, 5.0, 10.0, 100.0)
+
+
+def infer_ideal_score(observed_max: float) -> float:
+    """Terka skor maksimum instrumen dari nilai tertinggi yang teramati.
+
+    Yang dicari adalah **skor maksimum yang mungkin dicapai instrumennya**,
+    bukan skor tertinggi yang kebetulan muncul di data. Memakai nilai teramati
+    sebagai skor ideal — seperti yang dilakukan versi sebelumnya — salah dalam
+    dua hal sekaligus: penyebutnya mengecil sehingga N-Gain menggelembung, dan
+    angkanya berubah setiap ada responden baru. Seorang pembimbing yang
+    menghitung ulang dengan skor ideal sebenarnya tidak akan menemukan angka
+    yang sama.
+    """
+    for standard in STANDARD_IDEAL_SCORES:
+        if observed_max <= standard:
+            return standard
+    return float(math.ceil(observed_max / 10.0) * 10)
+
+
 def ngain(
-    frame: pd.DataFrame, pretest: str, posttest: str, ideal_score: float | None = None
+    frame: pd.DataFrame,
+    pretest: str,
+    posttest: str,
+    ideal_score: float | None = None,
 ) -> AnalysisResult:
-    """Uji efektivitas lewat N-Gain ternormalisasi Hake."""
+    """Uji efektivitas lewat N-Gain ternormalisasi Hake.
+
+    ``ideal_score`` adalah skor maksimum yang mungkin dicapai instrumen —
+    100 untuk tes berskala seratus, 5 untuk angket Likert lima titik. Bila
+    tidak diisi, nilainya diterka dari skala baku dan hasilnya ditandai
+    ``ideal_score_assumed`` serta dinyatakan terus terang pada peringatan,
+    karena angka ini menentukan seluruh hasilnya.
+    """
     _require_columns(frame, [pretest, posttest])
+    _require_distinct(skor_pretest=pretest, skor_posttest=posttest)
     data = _numeric(frame, [pretest, posttest]).dropna()
     if data.empty:
         raise AnalysisError("Tidak ada pasangan pretest-posttest yang lengkap.")
 
-    ideal = ideal_score if ideal_score is not None else float(data[posttest].max())
+    observed_max = float(max(data[pretest].max(), data[posttest].max()))
+    assumed = ideal_score is None
+    ideal = float(ideal_score) if ideal_score is not None else infer_ideal_score(observed_max)
+    # Hanya yang benar-benar di bawah data yang ditolak. Skor ideal yang persis
+    # sama dengan nilai tertinggi itu wajar — ada responden yang memang meraih
+    # nilai sempurna — dan ditangani penjaga penyebut di bawah.
+    if ideal < observed_max and not assumed:
+        raise AnalysisError(
+            f"Skor ideal {_r(ideal)} lebih kecil daripada nilai tertinggi pada data "
+            f"({_r(observed_max)}). Periksa kembali skor maksimum instrumennya."
+        )
+
     denominator = ideal - data[pretest]
-    gains = (data[posttest] - data[pretest]) / denominator.replace(0, np.nan)
-    gains = gains.dropna()
+    # Penyebut nol atau negatif muncul bila ada responden yang skor pretest-nya
+    # sudah menyentuh atau melampaui skor ideal. Sebelumnya hanya nol yang
+    # dibuang, sehingga penyebut negatif ikut terhitung dan menghasilkan N-Gain
+    # minus yang menarik turun rata-rata tanpa terlihat.
+    usable = denominator > 0
+    dropped = int((~usable).sum())
+    gains = ((data[posttest] - data[pretest]) / denominator)[usable].dropna()
+    if gains.empty:
+        raise AnalysisError(
+            "Seluruh responden memiliki skor pretest yang sudah menyentuh skor ideal, "
+            "sehingga N-Gain tidak dapat dihitung. Periksa skor ideal instrumennya."
+        )
     mean_gain = float(gains.mean())
 
     def category(value: float) -> str:
@@ -1384,7 +1547,11 @@ def ngain(
                          "Rata-rata N-Gain", "Kategori"],
                 rows=[[len(gains), _r(data[pretest].mean()), _r(data[posttest].mean()),
                        _r(ideal), _r(mean_gain), category(mean_gain)]],
-                note="N-Gain = (posttest − pretest) / (skor ideal − pretest).",
+                note=(
+                    f"N-Gain = (posttest − pretest) / (skor ideal − pretest), "
+                    f"dengan skor ideal {_r(ideal)}"
+                    + (" (diterka dari skala data)." if assumed else " (diisi peneliti).")
+                ),
             ),
             Table(
                 title="Sebaran Kategori N-Gain",
@@ -1395,6 +1562,7 @@ def ngain(
         values={
             "n": len(gains), "mean_pretest": _r(data[pretest].mean()),
             "mean_posttest": _r(data[posttest].mean()), "ideal_score": _r(ideal),
+            "ideal_score_assumed": assumed, "excluded": dropped,
             "mean_ngain": _r(mean_gain), "category": category(mean_gain),
             "paired_t": paired.values,
         },
@@ -1404,6 +1572,27 @@ def ngain(
             f"Rata-rata N-Gain sebesar {_r(mean_gain)} termasuk kategori "
             f"{category(mean_gain).lower()}.",
             *paired.findings[1:],
+        ],
+        warnings=[
+            *(
+                [
+                    f"Skor ideal {_r(ideal)} diterka dari skala data, bukan diisi peneliti. "
+                    f"Angka ini menentukan seluruh hasil N-Gain — isi sendiri bila instrumen "
+                    f"Anda memakai skor maksimum lain, karena pembimbing yang menghitung "
+                    f"ulang akan memakai skor maksimum instrumen yang sebenarnya."
+                ]
+                if assumed
+                else []
+            ),
+            *(
+                [
+                    f"{dropped} responden tidak diikutkan karena skor pretest-nya sudah "
+                    f"menyentuh atau melampaui skor ideal, sehingga penyebut N-Gain menjadi "
+                    f"nol atau negatif."
+                ]
+                if dropped
+                else []
+            ),
         ],
     )
 

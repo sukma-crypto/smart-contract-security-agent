@@ -78,7 +78,7 @@ sedang aktif.
 Menjalankan pengujian:
 
 ```bash
-python -m pytest recens/tests -q      # 238 pengujian
+python -m pytest recens/tests -q      # 275 pengujian
 ```
 
 **Akun dibutuhkan.** Seluruh data pengguna terkunci ke pemiliknya, jadi buka
@@ -273,7 +273,7 @@ recens/
 │   ├── src/components/ui/      primitif shadcn di atas Radix
 │   └── src/lib/                pemanggilan API, tipe, auth, dan state aplikasi
 ├── web/                        hasil build antarmuka (ikut di-commit)
-└── tests/                      238 pengujian
+└── tests/                      275 pengujian
 ```
 
 Aplikasi punya tiga wajah yang sengaja dibedakan. `/` adalah halaman depan —
