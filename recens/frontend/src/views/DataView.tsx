@@ -7,8 +7,7 @@ import {
   Callout,
   DataTable,
   Empty,
-  Metric,
-  MetricRow,
+  StatLine,
   Tabs,
   TabsContent,
   TabsList,
@@ -702,12 +701,14 @@ function QualitativePanel({ datasets }: { datasets: Dataset[] }) {
 
         {themes ? (
           <div className="mt-4">
-            <MetricRow>
-              <Metric value={themes.n_codes} label="kode" />
-              <Metric value={themes.n_segments} label="segmen" />
-              <Metric value={themes.themes.length} label="tema" />
-              <Metric value={themes.reduction.n_after} label="setelah reduksi" />
-            </MetricRow>
+            <StatLine
+              items={[
+                { label: "kode", value: themes.n_codes },
+                { label: "segmen", value: themes.n_segments },
+                { label: "tema", value: themes.themes.length },
+                { label: "setelah reduksi", value: themes.reduction.n_after },
+              ]}
+            />
             {themes.triangulation.single_source_codes.length ? (
               <Callout
                 variant="warning"

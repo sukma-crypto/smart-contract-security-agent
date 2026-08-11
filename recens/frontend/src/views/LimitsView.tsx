@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Check, X } from "lucide-react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, Section } from "@/components/ui/card";
 import { Badge, Callout, DataTable } from "@/components/ui/display";
 import { api } from "@/lib/api";
 import { useActions, useApp } from "@/lib/store";
@@ -28,31 +28,29 @@ export function LimitsView() {
         Batasan berikut melekat pada produk dan tidak dapat dimatikan.
       </PageHeader>
 
-      <Card className="mb-3.5">
-        <CardContent className="pt-5">
-          <div className="grid gap-2.5 sm:grid-cols-2">
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-success">
-              <Check className="size-3.5" /> Yang dilakukan Recens
-            </div>
-            <div className="hidden items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-destructive sm:flex">
-              <X className="size-3.5" /> Yang tidak dilakukan Recens
-            </div>
-            {catalog!.product_limits.map((limit) => (
-              <React.Fragment key={limit.rule}>
-                <div className="rounded-md border border-success/25 bg-success/5 px-3.5 py-2.5 text-[13px]">
-                  {limit.does}
-                </div>
-                <div className="rounded-md border border-destructive/25 bg-destructive/5 px-3.5 py-2.5 text-[13px]">
-                  {limit.does_not}
-                  <p className="mt-1 font-mono text-[10.5px] text-muted-foreground">
-                    {limit.rule}
-                  </p>
-                </div>
-              </React.Fragment>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <Section>
+        <div className="grid gap-x-8 gap-y-0 sm:grid-cols-2">
+          <p className="flex items-center gap-1.5 border-b border-border pb-2 text-[12.5px] font-semibold text-success">
+            <Check className="size-3.5" /> Yang dilakukan Recens
+          </p>
+          <p className="hidden items-center gap-1.5 border-b border-border pb-2 text-[12.5px] font-semibold text-destructive sm:flex">
+            <X className="size-3.5" /> Yang tidak dilakukan Recens
+          </p>
+          {catalog!.product_limits.map((limit) => (
+            <React.Fragment key={limit.rule}>
+              <p className="border-b border-border py-3 text-[13px] leading-relaxed">
+                {limit.does}
+              </p>
+              <p className="border-b border-border py-3 text-[13px] leading-relaxed text-muted-foreground">
+                {limit.does_not}
+                <span className="mt-0.5 block font-mono text-[10.5px] text-faint">
+                  {limit.rule}
+                </span>
+              </p>
+            </React.Fragment>
+          ))}
+        </div>
+      </Section>
 
       {plans ? (
         <Card>

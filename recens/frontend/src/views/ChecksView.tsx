@@ -1,19 +1,11 @@
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Badge,
-  Callout,
-  DataTable,
-  Empty,
-  Finding,
-  Metric,
-  MetricRow,
-} from "@/components/ui/display";
+import { Section } from "@/components/ui/card";
+import { Badge, Callout, DataTable, Empty, Finding, StatLine } from "@/components/ui/display";
 import { api } from "@/lib/api";
 import { useActions, useApp } from "@/lib/store";
-import { num } from "@/lib/utils";
+import { cn, num } from "@/lib/utils";
 import { PageHeader, useBusy } from "@/views/shared";
 
 interface Issue {
@@ -90,33 +82,36 @@ export function ChecksView() {
 
   return (
     <>
-      <PageHeader title="Periksa naskah">
+      <PageHeader
+        title="Periksa naskah"
+        action={
+          <div className="text-right">
+            <Button
+              loading={isBusy("run")}
+              onClick={() =>
+                withBusy("run", async () => {
+                  const result = await run(() =>
+                    api.post<ChecksResponse>(`/projects/${project!.id}/checks`),
+                  );
+                  if (result) setData(result);
+                })
+              }
+            >
+              {data ? "Periksa ulang" : "Jalankan pemeriksaan"}
+            </Button>
+            <p className="mt-1.5 text-[11px] text-faint">Berjalan lokal, tanpa kredit.</p>
+          </div>
+        }
+      >
         Keselarasan rumusan masalah sampai kesimpulan, kelengkapan silang sitasi, kaidah PUEBI,
         serta indikasi kemiripan — sebelum naskah masuk sistem kampus.
       </PageHeader>
 
-      <Card className="mb-3.5">
-        <CardContent className="flex flex-wrap items-center gap-3 pt-5">
-          <Button
-            loading={isBusy("run")}
-            onClick={() =>
-              withBusy("run", async () => {
-                const result = await run(() =>
-                  api.post<ChecksResponse>(`/projects/${project!.id}/checks`),
-                );
-                if (result) setData(result);
-              })
-            }
-          >
-            Jalankan seluruh pemeriksaan
-          </Button>
-          <span className="text-[11.5px] text-muted-foreground">
-            Berjalan lokal, tidak menagih kredit.
-          </span>
-        </CardContent>
-      </Card>
-
-      {!data ? <Empty>Belum ada pemeriksaan.</Empty> : <Results data={data} />}
+      {!data ? (
+        <Empty>Belum ada pemeriksaan dijalankan.</Empty>
+      ) : (
+        <Results data={data} />
+      )}
     </>
   );
 }
@@ -125,12 +120,8 @@ function Results({ data }: { data: ChecksResponse }) {
   const { summary, checks } = data;
 
   return (
-    <div className="flex flex-col gap-3.5">
-      <Card>
-        <CardHeader>
-          <CardTitle>Ringkasan</CardTitle>
-        </CardHeader>
-        <CardContent>
+    <div>
+      <Section title="Ringkasan">
           <Callout
             variant={summary.ready_to_submit ? "success" : "warning"}
             className="mb-3"
@@ -144,29 +135,32 @@ function Results({ data }: { data: ChecksResponse }) {
               .map((a) => `${a.kind}: ${a.count} temuan${a.critical ? ` (${a.critical} berat)` : ""}`)
               .join(" · ")}
           </Callout>
-          <MetricRow>
+          <div className="flex flex-wrap gap-x-7 gap-y-3">
             {summary.areas.map((area) => (
-              <Metric
-                key={area.kind}
-                value={area.percent !== undefined ? `${area.percent}%` : area.count}
-                label={area.kind}
-                hint={
-                  <Badge variant={area.passed ? "success" : "warning"}>
-                    {area.passed ? "lolos" : "periksa"}
-                  </Badge>
-                }
-              />
+              <div key={area.kind} className="flex items-baseline gap-2">
+                <span
+                  className={cn(
+                    "tabular text-[17px] font-semibold leading-none",
+                    area.passed ? "text-muted-foreground" : "text-warning",
+                  )}
+                >
+                  {area.percent !== undefined ? `${area.percent}%` : area.count}
+                </span>
+                <span className="text-[11.5px] text-muted-foreground">{area.kind}</span>
+                {area.passed ? (
+                  <Badge variant="success">lolos</Badge>
+                ) : (
+                  <Badge variant="warning">periksa</Badge>
+                )}
+              </div>
             ))}
-          </MetricRow>
-        </CardContent>
-      </Card>
+        </div>
+      </Section>
 
       {checks.bahasa ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Bahasa akademik Indonesia — {checks.bahasa.total} temuan</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Section
+          title={`Bahasa akademik Indonesia — ${checks.bahasa.total} temuan`}
+        >
             <p className="mb-2.5 text-[11.5px] text-muted-foreground">
               {num(checks.bahasa.word_count)} kata, {num(checks.bahasa.sentence_count)} kalimat.
             </p>
@@ -189,26 +183,27 @@ function Results({ data }: { data: ChecksResponse }) {
                 …dan {checks.bahasa.total - 25} temuan lain.
               </p>
             ) : null}
-          </CardContent>
-        </Card>
+        </Section>
       ) : null}
 
       {checks.sitasi ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Cek silang sitasi</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <MetricRow>
-              <Metric value={checks.sitasi.n_references} label="referensi" />
-              <Metric value={checks.sitasi.n_citations_in_text} label="sitasi dalam teks" />
-              <Metric value={checks.sitasi.dangling.length} label="sitasi menggantung" />
-              <Metric value={checks.sitasi.uncited.length} label="referensi tak dikutip" />
-              <Metric
-                value={checks.sitasi.recency.recent}
-                label={`terbit ≤ ${checks.sitasi.recency.window_years} thn`}
-              />
-            </MetricRow>
+        <Section title="Cek silang sitasi">
+            <StatLine
+              items={[
+                { label: "referensi", value: checks.sitasi.n_references },
+                { label: "sitasi dalam teks", value: checks.sitasi.n_citations_in_text },
+                {
+                  label: "menggantung",
+                  value: checks.sitasi.dangling.length,
+                  tone: checks.sitasi.dangling.length ? "danger" : "default",
+                },
+                { label: "tak dikutip", value: checks.sitasi.uncited.length },
+                {
+                  label: `terbit ≤ ${checks.sitasi.recency.window_years} thn`,
+                  value: checks.sitasi.recency.recent,
+                },
+              ]}
+            />
             <div className="mt-3">
               {checks.sitasi.issues.length ? (
                 checks.sitasi.issues.map((issue, index) => (
@@ -222,16 +217,11 @@ function Results({ data }: { data: ChecksResponse }) {
                 </Callout>
               )}
             </div>
-          </CardContent>
-        </Card>
+        </Section>
       ) : null}
 
       {checks.konsistensi ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Cek konsistensi</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Section title="Cek konsistensi">
             <p className="mb-2.5 text-[11.5px] text-muted-foreground">
               Butir terbaca:{" "}
               {Object.entries(checks.konsistensi.counts)
@@ -249,18 +239,13 @@ function Results({ data }: { data: ChecksResponse }) {
                 Rumusan masalah, tujuan, dan simpulan sudah selaras.
               </Callout>
             )}
-          </CardContent>
-        </Card>
+        </Section>
       ) : null}
 
       {checks.kemiripan ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              Cek kemiripan mandiri — {checks.kemiripan.similarity_percent}%
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Section
+          title={`Cek kemiripan mandiri — ${checks.kemiripan.similarity_percent}%`}
+        >
             <Callout className="mb-3">{checks.kemiripan.scope_note}</Callout>
             {checks.kemiripan.matches.length ? (
               checks.kemiripan.matches.slice(0, 10).map((match, index) => (
@@ -284,25 +269,22 @@ function Results({ data }: { data: ChecksResponse }) {
                 Tidak ditemukan rentang yang mirip dengan sumber di pustaka.
               </Callout>
             )}
-          </CardContent>
-        </Card>
+        </Section>
       ) : null}
 
       {checks.batas ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Cek batas panjang</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <MetricRow>
-              <Metric value={num(checks.batas.total_words)} label="kata" />
-              <Metric value={checks.batas.estimated_pages} label="perkiraan halaman" />
-              <Metric
-                value={checks.batas.max_words ? num(checks.batas.max_words) : "—"}
-                label="batas kata"
-              />
-              <Metric value={checks.batas.max_pages ?? "—"} label="batas halaman" />
-            </MetricRow>
+        <Section title="Cek batas panjang">
+            <StatLine
+              items={[
+                { label: "kata", value: num(checks.batas.total_words) },
+                { label: "perkiraan halaman", value: checks.batas.estimated_pages },
+                {
+                  label: "batas kata",
+                  value: checks.batas.max_words ? num(checks.batas.max_words) : "—",
+                },
+                { label: "batas halaman", value: checks.batas.max_pages ?? "—" },
+              ]}
+            />
             <div className="my-3">
               {checks.batas.issues.length ? (
                 checks.batas.issues.map((issue, index) => (
@@ -328,8 +310,7 @@ function Results({ data }: { data: ChecksResponse }) {
                   </Badge>,
                 ])}
             />
-          </CardContent>
-        </Card>
+        </Section>
       ) : null}
     </div>
   );

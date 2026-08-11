@@ -9,8 +9,7 @@ import {
   DataTable,
   Empty,
   Finding,
-  Metric,
-  MetricRow,
+  StatLine,
   Pre,
 } from "@/components/ui/display";
 import { Field, FileInput, Input, SimpleSelect, Textarea } from "@/components/ui/form";
@@ -636,23 +635,24 @@ function ConversionCard({
 
         {plan ? (
           <div className="mt-3.5">
-            <MetricRow>
-              <Metric value={num(plan.source_words)} label="kata naskah asal" />
-              <Metric value={num(plan.target_words)} label="target artikel" />
-              <Metric
-                value={
-                  plan.overall_compression <= 1
-                    ? `${Math.round(plan.overall_compression * 100)}%`
-                    : "—"
-                }
-                label={
-                  plan.overall_compression <= 1
-                    ? "tersisa setelah dipadatkan"
-                    : "naskah lebih pendek dari target"
-                }
-              />
-              <Metric value={plan.citekeys.length} label="sitasi ikut" />
-            </MetricRow>
+            <StatLine
+              items={[
+                { label: "kata naskah asal", value: num(plan.source_words) },
+                { label: "target artikel", value: num(plan.target_words) },
+                {
+                  label:
+                    plan.overall_compression <= 1
+                      ? "tersisa setelah dipadatkan"
+                      : "naskah lebih pendek dari target",
+                  value:
+                    plan.overall_compression <= 1
+                      ? `${Math.round(plan.overall_compression * 100)}%`
+                      : "—",
+                  tone: plan.overall_compression <= 1 ? "default" : "warning",
+                },
+                { label: "sitasi ikut", value: plan.citekeys.length },
+              ]}
+            />
 
             <div className="mt-3">
               {plan.warnings.map((warning, index) => (

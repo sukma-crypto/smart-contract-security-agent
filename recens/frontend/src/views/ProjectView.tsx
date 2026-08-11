@@ -3,7 +3,7 @@ import { FolderOpen } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge, Callout, Empty, Metric, MetricRow } from "@/components/ui/display";
+import { Badge, Callout, Empty, StatLine } from "@/components/ui/display";
 import { Field, Input, SimpleSelect } from "@/components/ui/form";
 import { api } from "@/lib/api";
 import { useActions, useApp } from "@/lib/store";
@@ -193,18 +193,24 @@ function ActiveProject({ project }: { project: Project }) {
         <CardTitle>Proyek aktif</CardTitle>
       </CardHeader>
       <CardContent>
-        <MetricRow>
-          <Metric value={num(project.word_count)} label="kata tertulis" />
-          <Metric value={num(project.target_words)} label="target kata" />
-          <Metric
-            value={project.counts.references}
-            label={`referensi (${project.counts.references_verified} terverifikasi)`}
-          />
-          <Metric value={project.counts.analyses} label="analisis tersimpan" />
-          <Metric value={project.counts.revisions_open} label="revisi terbuka" />
-        </MetricRow>
+        <StatLine
+          items={[
+            { label: "kata tertulis", value: num(project.word_count) },
+            { label: "target", value: num(project.target_words) },
+            {
+              label: `referensi · ${project.counts.references_verified} terverifikasi`,
+              value: project.counts.references,
+            },
+            { label: "analisis", value: project.counts.analyses },
+            {
+              label: "revisi terbuka",
+              value: project.counts.revisions_open,
+              tone: project.counts.revisions_open ? "warning" : "default",
+            },
+          ]}
+        />
 
-        <dl className="mt-4 divide-y divide-border border-t border-border text-[13px]">
+        <dl className="mt-5 divide-y divide-border border-t border-border text-[13px]">
           {rows.map(([label, value]) => (
             <div key={label} className="grid gap-1 py-2 sm:grid-cols-[11rem_1fr] sm:gap-4">
               <dt className="text-[11.5px] font-semibold text-muted-foreground sm:text-[13px]">

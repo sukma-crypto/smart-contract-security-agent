@@ -2,23 +2,24 @@ import * as React from "react";
 import * as ProgressPrimitive from "@radix-ui/react-progress";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 import { cva, type VariantProps } from "class-variance-authority";
-import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-/* --- Badge --- */
+/* --- Badge -----------------------------------------------------------------
+   Penanda kecil dengan warna yang menyampaikan status, bukan hiasan. */
 
 const badgeVariants = cva(
-  "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium leading-tight",
+  "inline-flex items-center gap-1 rounded px-1.5 py-px text-[11px] font-medium leading-[1.5]",
   {
     variants: {
       variant: {
-        default: "border-border bg-muted text-muted-foreground",
-        success: "border-success/30 bg-success/10 text-success",
-        warning: "border-warning/30 bg-warning/10 text-warning",
-        danger: "border-destructive/30 bg-destructive/10 text-destructive",
-        accent: "border-primary/25 bg-accent text-accent-foreground",
-        mono: "border-primary/25 bg-accent font-mono text-accent-foreground",
+        default: "bg-muted text-muted-foreground",
+        outline: "border border-border text-muted-foreground",
+        success: "bg-success/12 text-success",
+        warning: "bg-warning/12 text-warning",
+        danger: "bg-destructive/12 text-destructive",
+        accent: "bg-accent text-accent-foreground",
+        mono: "bg-accent font-mono text-[10.5px] text-accent-foreground",
       },
     },
     defaultVariants: { variant: "default" },
@@ -33,25 +34,15 @@ export function Badge({
   return <span className={cn(badgeVariants({ variant }), className)} {...props} />;
 }
 
-/* --- Callout: catatan, peringatan, dan penolakan --- */
+/* --- Callout ---------------------------------------------------------------
+   Tanpa ikon dan tanpa latar penuh: hanya garis tepi berwarna. Kotak berlatar
+   yang bertumpuk membuat semua pesan terasa sama mendesaknya. */
 
-const calloutVariants = cva("rounded-md border px-3.5 py-3 text-[13px]", {
-  variants: {
-    variant: {
-      default: "border-border bg-muted text-foreground",
-      success: "border-success/25 bg-success/10 text-foreground",
-      warning: "border-warning/30 bg-warning/10 text-foreground",
-      danger: "border-destructive/30 bg-destructive/10 text-foreground",
-    },
-  },
-  defaultVariants: { variant: "default" },
-});
-
-const calloutIcons = {
-  default: Info,
-  success: CheckCircle2,
-  warning: AlertTriangle,
-  danger: XCircle,
+const calloutTone = {
+  default: "border-border-strong",
+  success: "border-success",
+  warning: "border-warning",
+  danger: "border-destructive",
 } as const;
 
 export function Callout({
@@ -61,33 +52,63 @@ export function Callout({
   children,
 }: {
   title?: React.ReactNode;
-  variant?: "default" | "success" | "warning" | "danger";
+  variant?: keyof typeof calloutTone;
   className?: string;
   children?: React.ReactNode;
 }) {
-  const Icon = calloutIcons[variant];
   return (
-    <div className={cn(calloutVariants({ variant }), className)}>
-      <div className="flex gap-2.5">
-        <Icon
+    <div className={cn("rule-left py-1", calloutTone[variant], className)}>
+      {title ? (
+        <p
           className={cn(
-            "mt-0.5 size-4 shrink-0",
+            "text-[13px] font-semibold leading-snug",
             variant === "success" && "text-success",
             variant === "warning" && "text-warning",
             variant === "danger" && "text-destructive",
-            variant === "default" && "text-muted-foreground",
           )}
-        />
-        <div className="min-w-0 flex-1">
-          {title ? <div className="mb-0.5 font-semibold">{title}</div> : null}
+        >
+          {title}
+        </p>
+      ) : null}
+      {children ? (
+        <div className="text-[12.5px] leading-relaxed text-muted-foreground [&_p+p]:mt-1">
           {children}
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
 
-/* --- Metric --- */
+/* --- Statistik -------------------------------------------------------------
+   Dua bentuk: baris angka sebaris untuk konteks, dan kartu hanya ketika
+   perbandingan antarangka memang jadi maksudnya (dashboard). */
+
+export function StatLine({
+  items,
+  className,
+}: {
+  items: { label: string; value: React.ReactNode; tone?: "default" | "warning" | "danger" }[];
+  className?: string;
+}) {
+  return (
+    <dl className={cn("flex flex-wrap items-baseline gap-x-6 gap-y-1.5", className)}>
+      {items.map((item) => (
+        <div key={item.label} className="flex items-baseline gap-1.5">
+          <dd
+            className={cn(
+              "tabular text-[15px] font-semibold leading-none",
+              item.tone === "warning" && "text-warning",
+              item.tone === "danger" && "text-destructive",
+            )}
+          >
+            {item.value}
+          </dd>
+          <dt className="text-[11.5px] text-muted-foreground">{item.label}</dt>
+        </div>
+      ))}
+    </dl>
+  );
+}
 
 export function Metric({
   value,
@@ -99,9 +120,9 @@ export function Metric({
   hint?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-md border border-border bg-muted/60 px-3.5 py-3">
-      <div className="tabular text-xl font-semibold leading-tight">{value}</div>
-      <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{label}</div>
+    <div className="border-l-2 border-border pl-3">
+      <div className="tabular text-[22px] font-semibold leading-none">{value}</div>
+      <div className="mt-1.5 text-[11.5px] leading-snug text-muted-foreground">{label}</div>
       {hint ? <div className="mt-1">{hint}</div> : null}
     </div>
   );
@@ -109,7 +130,9 @@ export function Metric({
 
 export function MetricRow({ children }: { children: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-2.5">{children}</div>
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-x-5 gap-y-4">
+      {children}
+    </div>
   );
 }
 
@@ -121,11 +144,11 @@ export const Progress = React.forwardRef<
 >(({ className, value = 0, ...props }, ref) => (
   <ProgressPrimitive.Root
     ref={ref}
-    className={cn("relative h-1.5 w-full overflow-hidden rounded-full bg-border", className)}
+    className={cn("relative h-1 w-full overflow-hidden rounded-full bg-border", className)}
     {...props}
   >
     <ProgressPrimitive.Indicator
-      className="h-full rounded-full bg-primary transition-all"
+      className="h-full rounded-full bg-primary/70 transition-all"
       style={{ width: `${Math.min(Math.max(value, 0), 100)}%` }}
     />
   </ProgressPrimitive.Root>
@@ -142,7 +165,7 @@ export const TabsList = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <TabsPrimitive.List
     ref={ref}
-    className={cn("flex flex-wrap items-center gap-1", className)}
+    className={cn("flex flex-wrap items-center gap-5 border-b border-border", className)}
     {...props}
   />
 ));
@@ -155,7 +178,7 @@ export const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "rounded-md border border-transparent px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted data-[state=active]:border-border data-[state=active]:bg-card data-[state=active]:font-semibold data-[state=active]:text-foreground",
+      "-mb-px border-b-2 border-transparent pb-2 text-[13px] text-muted-foreground transition-colors hover:text-foreground data-[state=active]:border-primary data-[state=active]:font-semibold data-[state=active]:text-foreground",
       className,
     )}
     {...props}
@@ -165,7 +188,8 @@ TabsTrigger.displayName = "TabsTrigger";
 
 export const TabsContent = TabsPrimitive.Content;
 
-/* --- Table --- */
+/* --- Tabel -----------------------------------------------------------------
+   Bergaris horizontal saja, seperti tabel pada naskah ilmiah. */
 
 export function DataTable({
   columns,
@@ -182,14 +206,14 @@ export function DataTable({
 }) {
   return (
     <div className={className}>
-      <div className="scrollbar-slim overflow-x-auto rounded-md border border-border">
-        <table className="w-full border-collapse text-[13px]">
+      <div className="scrollbar-slim overflow-x-auto">
+        <table className="w-full border-collapse text-[12.5px]">
           <thead>
-            <tr className="bg-muted/70">
+            <tr>
               {columns.map((column, index) => (
                 <th
                   key={index}
-                  className="border-b border-border px-3 py-2 text-left text-[11px] font-semibold text-muted-foreground"
+                  className="whitespace-nowrap border-b border-border-strong px-2.5 pb-1.5 pt-0 text-left text-[11px] font-semibold text-muted-foreground first:pl-0"
                 >
                   {column}
                 </th>
@@ -201,16 +225,16 @@ export function DataTable({
               <tr>
                 <td
                   colSpan={columns.length || 1}
-                  className="px-3 py-6 text-center text-muted-foreground"
+                  className="px-2.5 py-6 text-center text-muted-foreground"
                 >
                   {emptyLabel}
                 </td>
               </tr>
             ) : (
               rows.map((row, rowIndex) => (
-                <tr key={rowIndex} className="border-b border-border/60 last:border-0">
+                <tr key={rowIndex} className="border-b border-border last:border-0">
                   {row.map((cell, cellIndex) => (
-                    <td key={cellIndex} className="px-3 py-2 align-top">
+                    <td key={cellIndex} className="px-2.5 py-1.5 align-top first:pl-0">
                       {cell}
                     </td>
                   ))}
@@ -220,12 +244,17 @@ export function DataTable({
           </tbody>
         </table>
       </div>
-      {note ? <p className="mt-1.5 text-[11px] text-muted-foreground">{note}</p> : null}
+      {note ? (
+        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{note}</p>
+      ) : null}
     </div>
   );
 }
 
-/* --- Finding: satu temuan pemeriksaan --- */
+/* --- Temuan ----------------------------------------------------------------
+   Ditulis seperti catatan tepi pembimbing: aturan yang dilanggar, kutipan
+   naskahnya, lalu usulan perbaikan. Tanpa latar, supaya daftar panjang tetap
+   enak dibaca. */
 
 export function Finding({
   severity = "sedang",
@@ -233,46 +262,50 @@ export function Finding({
   children,
   excerpt,
   suggestion,
+  where,
 }: {
   severity?: string;
   title?: React.ReactNode;
   children?: React.ReactNode;
   excerpt?: string;
   suggestion?: string;
+  where?: string;
 }) {
-  const border =
+  const tone =
     severity === "tinggi"
-      ? "border-l-destructive"
+      ? "border-destructive"
       : severity === "rendah"
-        ? "border-l-border"
-        : "border-l-warning";
+        ? "border-border-strong"
+        : "border-warning";
   return (
-    <div className={cn("mb-1.5 rounded-r-md border-l-[3px] bg-muted/60 px-3 py-2", border)}>
-      {title ? <div className="text-[13px] font-medium">{title}</div> : null}
-      {children ? <div className="text-[13px]">{children}</div> : null}
+    <div className={cn("rule-left py-2", tone)}>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        {title ? <span className="text-[13px] leading-snug">{title}</span> : null}
+        {children ? <span className="text-[13px] leading-snug">{children}</span> : null}
+        {where ? <span className="text-[11px] text-faint">{where}</span> : null}
+      </div>
       {excerpt ? (
-        <p className="mt-1 font-mono text-[11.5px] leading-relaxed text-muted-foreground">
+        <p className="mt-1 font-mono text-[11px] leading-relaxed text-muted-foreground">
           {excerpt}
         </p>
       ) : null}
-      {suggestion ? <p className="mt-1 text-[11.5px] text-primary">→ {suggestion}</p> : null}
+      {suggestion ? (
+        <p className="mt-1 text-[12px] text-primary">
+          <span className="text-faint">→ </span>
+          {suggestion}
+        </p>
+      ) : null}
     </div>
   );
 }
 
-/* --- Empty --- */
-
 export function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="rounded-md border border-dashed border-border px-4 py-8 text-center text-[13px] text-muted-foreground">
-      {children}
-    </div>
-  );
+  return <p className="py-6 text-[12.5px] text-muted-foreground">{children}</p>;
 }
 
 export function Pre({ children }: { children: React.ReactNode }) {
   return (
-    <pre className="scrollbar-slim max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/60 p-3 font-mono text-[11.5px] leading-relaxed">
+    <pre className="scrollbar-slim measure max-h-80 overflow-auto whitespace-pre-wrap break-words border-l-2 border-border py-1 pl-3.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">
       {children}
     </pre>
   );

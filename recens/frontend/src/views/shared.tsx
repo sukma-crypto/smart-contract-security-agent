@@ -1,13 +1,28 @@
 import * as React from "react";
 
 /** Judul halaman beserta kalimat penjelasnya. */
-export function PageHeader({ title, children }: { title: string; children?: React.ReactNode }) {
+export function PageHeader({
+  title,
+  children,
+  action,
+}: {
+  title: string;
+  children?: React.ReactNode;
+  action?: React.ReactNode;
+}) {
   return (
-    <div className="mb-5">
-      <h2 className="font-serif text-[22px] font-semibold leading-tight">{title}</h2>
-      {children ? (
-        <p className="mt-1 max-w-3xl text-[13px] text-muted-foreground">{children}</p>
-      ) : null}
+    <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+      <div className="min-w-0">
+        <h2 className="font-serif text-[27px] font-semibold leading-tight tracking-tight">
+          {title}
+        </h2>
+        {children ? (
+          <p className="mt-1.5 max-w-[58ch] text-[12.5px] leading-relaxed text-muted-foreground">
+            {children}
+          </p>
+        ) : null}
+      </div>
+      {action}
     </div>
   );
 }
