@@ -16,7 +16,8 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useCountUp, useReveal, useTypewriter, type Segment } from "@/landing/hooks";
+import { useCountUp, useReveal, useRotator, useTypewriter, type Segment } from "@/landing/hooks";
+import { ASSURANCES, HERO_CLAIMS, REASSURANCES } from "@/landing/claims";
 import {
   BookStack,
   CheckedDoc,
@@ -137,9 +138,11 @@ export function Landing({ onEnter, onSignIn, signedIn }: LandingProps) {
       <Nav onEnter={onEnter} onSignIn={onSignIn} signedIn={signedIn} cta={cta} />
       <Hero onEnter={onEnter} cta={cta} />
       <Marquee />
+      <RotatingClaims />
       <Problems />
       <Workflow />
       <Engine />
+      <Assurances />
       <Limits />
       <Closing onEnter={onEnter} cta={cta} />
       <Footer />
@@ -232,6 +235,10 @@ function Hero({ onEnter, cta }: { onEnter: () => void; cta: string }) {
               sampai artikel jurnal — mengumpulkan referensi, menulis, mengolah data, memeriksa
               naskah, hingga mengekspor dokumen yang formatnya sudah benar.
             </p>
+
+            <div className="animate-rise mt-6" style={{ animationDelay: "200ms" }}>
+              <HeroClaim />
+            </div>
 
             <div
               className="animate-rise mt-7 flex flex-wrap items-center gap-3"
@@ -668,5 +675,153 @@ function Footer() {
         <span>AI writing tool untuk seluruh karya tulis ilmiah.</span>
       </div>
     </footer>
+  );
+}
+
+/* --- Kalimat yang berganti-ganti ------------------------------------------
+   Tiga tempat, tiga peran berbeda. Kalau ketiganya berbunyi sama, pengulangan
+   itu justru terbaca sebagai kekurangan bahan. */
+
+/**
+ * Baris berputar di hero.
+ *
+ * Hanya bagian yang berubah yang diberi warna dan gerak; "Dengan Recens," tetap
+ * diam. Mata jadi punya titik pegangan, dan pergantiannya terbaca sebagai satu
+ * kalimat yang melanjutkan diri — bukan papan iklan yang berganti gambar.
+ */
+function HeroClaim() {
+  const { index, leaving } = useRotator(HERO_CLAIMS.length, 3400);
+  const claim = HERO_CLAIMS[index];
+
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
+      {/* Satu paragraf sungguhan, bukan dua kotak flex berdampingan: dengan
+          begitu spasi antar-katanya ikut tersalin saat teksnya di-copy dan
+          terbaca utuh oleh pembaca layar. */}
+      <p className="text-[15px] font-medium sm:text-[16.5px]" aria-live="polite">
+        <span className="text-muted-foreground">{claim.lead} </span>
+        <span
+          className={cn(
+            "inline-block text-lagoon transition-all duration-[420ms] ease-out",
+            leaving ? "-translate-y-1 opacity-0 blur-[2px]" : "translate-y-0 opacity-100 blur-0",
+          )}
+        >
+          {claim.point}
+        </span>
+      </p>
+      {/* Penanda posisi: sekilas terlihat berapa banyak yang bergilir. */}
+      <span aria-hidden className="hidden items-center gap-1 sm:flex">
+        {HERO_CLAIMS.map((_, dot) => (
+          <span
+            key={dot}
+            className={cn(
+              "h-1 rounded-full transition-all duration-500",
+              dot === index ? "w-4 bg-lagoon" : "w-1 bg-lagoon/25",
+            )}
+          />
+        ))}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Pita pengingat di bawah deretan jenis karya.
+ *
+ * Nadanya sengaja tenang — ini bukan janji hasil, melainkan hal-hal yang
+ * membuat orang berani menaruh naskahnya di sini.
+ */
+function RotatingClaims() {
+  const { index, leaving } = useRotator(REASSURANCES.length, 4200);
+
+  return (
+    <section className="border-b border-border bg-paper px-5 py-5">
+      <div className="mx-auto flex min-h-[1.75rem] max-w-4xl items-center justify-center gap-2.5">
+        <ShieldCheck className="size-4 shrink-0 text-lagoon" />
+        <p
+          aria-live="polite"
+          className={cn(
+            "text-center text-[13.5px] text-muted-foreground transition-all duration-[420ms] ease-out",
+            leaving ? "translate-y-1 opacity-0" : "translate-y-0 opacity-100",
+          )}
+        >
+          {REASSURANCES[index]}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Bagian besar berisi keluhan yang dikenali pembaca, lalu jawabannya.
+ *
+ * Bentuk "dulu begini, sekarang begitu" dipakai karena pembacanya sedang
+ * mengalami sisi kirinya saat ini juga. Tiap butir ditutup bukti yang bisa
+ * diperiksa, bukan kata sifat — itulah bedanya meyakinkan dan menggembar.
+ */
+function Assurances() {
+  const { ref, shown } = useReveal<HTMLDivElement>();
+  const { index, leaving } = useRotator(ASSURANCES.length, 5200);
+  const item = ASSURANCES[index];
+
+  return (
+    <section className="relative isolate overflow-hidden bg-ink px-5 py-20 text-white/90">
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+        <div className="animate-drift absolute -left-24 top-0 size-[30rem] rounded-full bg-lagoon/25 blur-[110px]" />
+        <div
+          className="animate-drift absolute -right-24 bottom-0 size-[26rem] rounded-full bg-violet/25 blur-[110px]"
+          style={{ animationDelay: "-8s" }}
+        />
+      </div>
+
+      <div ref={ref} className={cn("mx-auto max-w-3xl reveal", shown && "revealed")}>
+        <p className="text-center text-[12px] font-medium uppercase tracking-[0.18em] text-white/45">
+          Yang berubah setelah memakai Recens
+        </p>
+
+        {/* Keluhannya ditampilkan sebagai kalimat yang dikutip, bukan dicoret.
+            Grid "Masalah" di atas sudah memakai bentuk coret-lalu-ganti, dan
+            mengulanginya di sini membuat halaman terbaca seperti kehabisan
+            bahan. Di sini urutannya dibalik: suara pembaca lebih dahulu,
+            jawabannya sebagai kalimat besar. */}
+        <div className="mt-8 min-h-[13.5rem] sm:min-h-[11.5rem]">
+          <div
+            className={cn(
+              "transition-all duration-[500ms] ease-out",
+              leaving ? "translate-y-2 opacity-0" : "translate-y-0 opacity-100",
+            )}
+            aria-live="polite"
+          >
+            <p className="border-l-2 border-clay/60 pl-4 text-[14px] italic leading-relaxed text-white/50">
+              “{item.pain}”
+            </p>
+
+            <p className="mt-5 font-serif text-[25px] leading-snug text-white sm:text-[29px]">
+              {item.answer}
+            </p>
+
+            <p className="mt-5 flex items-start gap-2.5 text-[13px] leading-relaxed text-white/60">
+              <Check className="mt-0.5 size-4 shrink-0 text-lagoon" />
+              {item.proof}
+            </p>
+          </div>
+        </div>
+
+        {/* Penanda posisi yang juga bisa diklik — orang yang tertarik pada satu
+            butir tidak perlu menunggu satu putaran penuh. */}
+        <div className="mt-6 flex justify-center gap-2">
+          {ASSURANCES.map((_, dot) => (
+            <span
+              key={dot}
+              aria-hidden
+              className={cn(
+                "h-1 rounded-full transition-all duration-500",
+                dot === index ? "w-8 bg-amber" : "w-2 bg-white/20",
+              )}
+            />
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }

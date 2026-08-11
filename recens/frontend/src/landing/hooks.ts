@@ -120,6 +120,48 @@ export function useTypewriter(segments: Segment[], speed = 26, startDelay = 500)
   return { parts, finished };
 }
 
+/**
+ * Berpindah antar-isi secara berkala, dengan jeda pergantian.
+ *
+ * Mengembalikan indeks yang sedang tampil beserta ``leaving`` — penanda bahwa
+ * isi lama sedang keluar. Dua keadaan itu dipisah supaya animasinya bisa keluar
+ * lebih dahulu lalu masuk, bukan berkedip berganti seketika.
+ *
+ * Berhenti sendiri saat tab tidak terlihat. Rotasi yang tetap berjalan di tab
+ * belakang hanya membakar baterai, dan saat orang kembali ia mendapati kalimat
+ * di tengah antrean tanpa pernah membaca yang sebelumnya.
+ */
+export function useRotator(count: number, interval = 3600, fade = 420) {
+  const [index, setIndex] = React.useState(0);
+  const [leaving, setLeaving] = React.useState(false);
+
+  React.useEffect(() => {
+    if (count <= 1) return;
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) return;
+
+    let timer = 0;
+    let swap = 0;
+
+    const tick = () => {
+      if (document.hidden) return;
+      setLeaving(true);
+      swap = window.setTimeout(() => {
+        setIndex((value) => (value + 1) % count);
+        setLeaving(false);
+      }, fade);
+    };
+
+    timer = window.setInterval(tick, interval);
+    return () => {
+      window.clearInterval(timer);
+      window.clearTimeout(swap);
+    };
+  }, [count, interval, fade]);
+
+  return { index, leaving };
+}
+
 /** Angka yang menghitung naik saat masuk layar. */
 export function useCountUp(target: number, shown: boolean, duration = 1100) {
   const [value, setValue] = React.useState(0);
