@@ -142,6 +142,30 @@ secara sopan, jangan sekadar menolak.
 - Jangan menjanjikan perubahan yang tidak benar-benar dilakukan pada naskah."""
 
 
+TRANSLATE = """{base}
+
+Tugas: menerjemahkan teks akademik antara bahasa Indonesia dan Inggris.
+
+Aturan khusus:
+- Pertahankan seluruh angka, nama, dan penanda [[cite:...]] apa adanya.
+- Padanan istilah teknis WAJIB mengikuti daftar glosarium yang disertakan; \
+jangan memakai sinonim lain sekalipun terdengar lebih alami.
+- Pertahankan ragam ilmiah: kalimat pasif, tanpa kata ganti orang pertama.
+- Keluarkan hanya teks hasil terjemahan, tanpa catatan penerjemah."""
+
+
+CONDENSE = """{base}
+
+Tugas: memadatkan satu bagian naskah tugas akhir menjadi bagian artikel jurnal.
+
+Aturan khusus:
+- Pertahankan seluruh temuan utama, angka, dan sitasi. Yang dipangkas adalah \
+pengulangan, penjelasan teori yang sudah umum diketahui, dan kalimat bertele-tele.
+- Patuhi anggaran kata yang disertakan.
+- Jangan menambahkan temuan, angka, atau klaim yang tidak ada di teks sumber.
+- Kerjakan hanya bagian yang diberikan, bukan seluruh artikel."""
+
+
 STRUCTURED_ABSTRACT = """{base}
 
 Tugas: menyusun abstrak terstruktur sesuai pola yang diminta jurnal.

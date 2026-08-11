@@ -6,19 +6,27 @@ import json
 import sqlite3
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .. import db
 from ..config import get_settings
+from ..core import annotations as annots
 from ..core import checks as check_pack
 from ..core.citations.library import build_bibliography
 from ..core.exporters import EXPORTERS
 from ..core.guidelines import active_ruleset
 from ..core.llm import services
 from ..core.manuscript import load_manuscript
-from .deps import charge_for, get_conn, get_project, project_rules, project_work_type
+from .deps import (
+    charge_for,
+    get_conn,
+    get_project,
+    project_rules,
+    project_work_type,
+    upload_path,
+)
 
 router = APIRouter(tags=["periksa"])
 
@@ -234,6 +242,68 @@ def update_revision(
         values["resolved_at"] = db.now()
     db.update(conn, "revisions", revision_id, **values)
     return dict(db.fetch_one(conn, "SELECT * FROM revisions WHERE id = ?", (revision_id,)))
+
+
+@router.post("/projects/{project_id}/revisions/import", status_code=201)
+async def import_revisions(
+    project_id: int,
+    file: UploadFile = File(...),
+    source: str = Form("pembimbing"),
+    author: str = Form(""),
+    dry_run: bool = Form(False),
+    conn: sqlite3.Connection = Depends(get_conn),
+) -> dict:
+    """Ubah coretan dosen menjadi daftar revisi berstatus.
+
+    Menerima PDF beranotasi dan dokumen Word berkomentar. Tiap komentar
+    ditautkan ke bagian naskah yang paling mungkin dimaksud; yang tidak dapat
+    ditautkan tetap dicatat tanpa lokasi, karena menempelkannya ke bagian yang
+    keliru lebih menyesatkan.
+    """
+    project = get_project(project_id, conn)
+    filename = file.filename or "catatan.pdf"
+    destination = upload_path(project_id, filename, "bimbingan")
+    destination.write_bytes(await file.read())
+
+    manuscript = load_manuscript(conn, project_id)
+    try:
+        result = annots.import_comments(destination, manuscript)
+    except annots.UnsupportedAnnotationSource as exc:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - berkas rusak
+        destination.unlink(missing_ok=True)
+        raise HTTPException(400, f"Berkas tidak dapat dibaca: {exc}") from exc
+
+    created: list[int] = []
+    if not dry_run:
+        for comment in result.comments:
+            text = comment.text
+            if comment.anchor:
+                text = f"{text}\n\n> {comment.anchor[:300]}"
+            created.append(
+                db.insert(
+                    conn,
+                    "revisions",
+                    project_id=project_id,
+                    section_id=comment.section_id,
+                    block_id=comment.block_id,
+                    source=source,
+                    author=comment.author or author or None,
+                    text=text,
+                    status="terbuka",
+                    created_at=db.now(),
+                )
+            )
+
+    charge_for(conn, project, "impor_komentar")
+    return {
+        **result.to_dict(),
+        "created": len(created),
+        "revision_ids": created,
+        "dry_run": dry_run,
+        "source_file": filename,
+    }
 
 
 @router.post("/projects/{project_id}/supervision", status_code=201)

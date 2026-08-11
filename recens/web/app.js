@@ -1091,6 +1091,16 @@ async function viewExport() {
         <div id="ex-out" style="margin-top:12px"></div></div>
 
       <div class="card"><h3>Pelacak bimbingan — ${revisions.total} revisi</h3>
+        <p class="hint">Coretan dosen — komentar PDF atau dokumen Word bertanda — diubah
+          menjadi daftar revisi berstatus yang terhubung ke lokasinya di naskah.</p>
+        <div class="row" style="margin-bottom:10px">
+          <div class="field grow"><label>Impor berkas bertanda (.pdf / .docx)</label>
+            <input type="file" id="rv-file" accept=".pdf,.docx"></div>
+          <div class="field"><label>Sumber</label><select id="rv-fsrc">
+            <option value="pembimbing">Pembimbing</option><option value="penguji">Penguji</option>
+            <option value="reviewer">Reviewer</option></select></div>
+          <button class="btn ghost" id="rv-import">Impor komentar</button></div>
+        <div id="rv-import-out" style="margin-bottom:10px"></div>
         <div class="row" style="margin-bottom:10px">
           <div class="field grow"><label>Catatan pembimbing / reviewer</label>
             <input type="text" id="rv-text" placeholder="Perbaiki rumusan masalah nomor 2 agar sejalan dengan tujuan"></div>
@@ -1126,6 +1136,38 @@ async function viewExport() {
         <p class="hint">Pertanyaan penguji disusun dari titik yang benar-benar rawan pada naskah.</p>
         <button class="btn" id="df-go">Susun kemungkinan pertanyaan</button>
         <div id="df-out" style="margin-top:12px"></div></div>` : ''}
+
+      ${d.family !== 'artikel_publikasi' ? `<div class="card"><h3>Konversi naskah menjadi artikel</h3>
+        <p class="hint">Memadatkan tugas akhir menjadi artikel berstruktur IMRAD tanpa
+          kehilangan temuan utamanya. Rencananya ditampilkan lebih dahulu.</p>
+        <div class="row">
+          <div class="field"><label>Target kata artikel</label>
+            <input type="number" id="cv-target" value="6000" style="width:120px"></div>
+          <button class="btn ghost" id="cv-plan">Lihat rencana</button>
+          <button class="btn" id="cv-apply">Bangun proyek artikel</button></div>
+        <div id="cv-out" style="margin-top:12px"></div></div>` : ''}
+
+      <div class="card"><h3>Jurnal tujuan</h3>
+        <p class="hint">Naskah tidak ditolak di meja editor hanya karena salah format.</p>
+        <div class="row">
+          <div class="field grow"><label>Profil jurnal</label>
+            <select id="jr-profile"><option value="">memuat…</option></select></div>
+          <button class="btn ghost" id="jr-check">Periksa kesiapan</button>
+          <button class="btn ghost" id="jr-apply">Jadikan aturan naskah</button></div>
+        <div id="jr-out" style="margin-top:12px"></div></div>
+
+      <div class="card"><h3>Dua bahasa</h3>
+        <p class="hint">Penerjemahan yang menjaga konsistensi istilah teknis per bidang ilmu —
+          menjawab kewajiban abstrak dwibahasa.</p>
+        <div class="field"><label>Teks bahasa Indonesia</label>
+          <textarea id="tr-id" placeholder="Penelitian ini menguji pengaruh motivasi kerja terhadap kinerja karyawan…"></textarea></div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn ghost" id="tr-go">Terjemahkan ke Inggris</button>
+          <button class="btn ghost" id="tr-glossary">Lihat padanan istilah</button></div>
+        <div class="field" style="margin-top:10px"><label>Versi bahasa Inggris (untuk diperiksa)</label>
+          <textarea id="tr-en" placeholder="This study examines the effect of work motivation on employee performance…"></textarea></div>
+        <button class="btn ghost" id="tr-check" style="margin-top:8px">Periksa konsistensi istilah</button>
+        <div id="tr-out" style="margin-top:12px"></div></div>
 
       ${d.submission_kit ? `<div class="card"><h3>Berkas submisi</h3>
         <div class="row">
@@ -1191,6 +1233,124 @@ async function viewExport() {
         <div style="margin-top:4px">${esc(q.kerangka_jawaban)}</div></div>`).join('')}</div>`;
   }, e.currentTarget);
 
+  $('#rv-import').onclick = (e) => run(async () => {
+    const file = $('#rv-file').files[0];
+    if (!file) return toast('Pilih berkas bertanda lebih dahulu.', true);
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('source', $('#rv-fsrc').value);
+    const res = await api(`/projects/${S.project.id}/revisions/import`, { method: 'POST', body: fd });
+    $('#rv-import-out').innerHTML = `<div class="note-box ${res.count ? 'ok' : 'warn'}">
+      <strong>${res.count} komentar terbaca — ${res.linked} tertaut ke bagian naskah,
+        ${res.created} dicatat sebagai revisi</strong>
+      ${res.notes.map(esc).join('<br>')}</div>
+      <div class="list" style="margin-top:8px">${res.comments.map((c) => `<div class="item">
+        <span class="tag">${esc(c.kind)}</span>
+        ${c.page ? `<span class="tag">hlm. ${c.page}</span>` : ''}
+        ${c.section_title ? `<span class="tag ok">${esc(c.section_title)}</span>`
+          : '<span class="tag warn">tanpa lokasi</span>'}
+        <div style="margin-top:4px">${esc(c.text)}</div>
+        ${c.anchor ? `<div class="meta" style="margin-top:3px">menyorot: “${esc(c.anchor.slice(0, 140))}”</div>` : ''}
+      </div>`).join('')}</div>`;
+    if (res.created) setTimeout(render, 1200);
+  }, e.currentTarget);
+
+  if ($('#cv-plan')) $('#cv-plan').onclick = (e) => run(async () => {
+    const res = await api(`/projects/${S.project.id}/conversion/plan`, { method: 'POST', body: {
+      target_words: Number($('#cv-target').value) } });
+    $('#cv-out').innerHTML = conversionHtml(res);
+  }, e.currentTarget);
+
+  if ($('#cv-apply')) $('#cv-apply').onclick = (e) => run(async () => {
+    if (!confirm('Bangun proyek artikel baru dari naskah ini? Naskah asli tidak diubah.')) return;
+    const res = await api(`/projects/${S.project.id}/conversion/apply`, { method: 'POST', body: {
+      target_words: Number($('#cv-target').value) } });
+    S.projects = await api('/projects');
+    $('#cv-out').innerHTML = `<div class="note-box ok">
+      <strong>Proyek artikel dibuat — ${res.sections_created} bagian,
+        ${res.references_copied} referensi ikut pindah</strong>${esc(res.note)}
+      <button class="btn small" id="cv-open" style="margin-top:8px">Buka proyek artikel</button></div>
+      ${conversionHtml(res.plan)}`;
+    $('#cv-open').onclick = () => run(async () => {
+      S.sectionId = null;
+      await refreshProject(res.project_id);
+      syncPicker(); S.view = 'menulis'; render();
+    });
+  }, e.currentTarget);
+
+  api('/journals').then((data) => {
+    const sel = $('#jr-profile');
+    if (!sel) return;
+    sel.innerHTML = data.profiles.map((p) =>
+      `<option value="${p.key}">${esc(p.name)}</option>`).join('');
+  });
+
+  if ($('#jr-check')) $('#jr-check').onclick = (e) => run(async () => {
+    const res = await api(`/projects/${S.project.id}/journal/readiness`, { method: 'POST', body: {
+      profile: $('#jr-profile').value } });
+    const p = res.profile_detail;
+    $('#jr-out').innerHTML = `
+      <div class="note-box ${res.ready ? 'ok' : 'warn'}">
+        <strong>${res.ready ? 'Struktur dan batas panjang sudah sesuai' : 'Belum siap dikirim'}</strong>
+        ${res.word_count} kata${p.max_words ? ` dari batas ${num(p.max_words)}` : ''} ·
+        gaya sitasi ${esc(p.citation_style.toUpperCase())}
+        ${p.abstract_max_words ? ` · abstrak maks. ${p.abstract_max_words} kata` : ''}</div>
+      <div class="row" style="margin:8px 0">
+        ${res.matched_sections.map((s) => `<span class="tag ok">${esc(s)}</span>`).join(' ')}
+        ${res.missing_sections.map((s) => `<span class="tag danger">kurang: ${esc(s)}</span>`).join(' ')}
+        ${res.extra_sections.map((s) => `<span class="tag warn">lebih: ${esc(s)}</span>`).join(' ')}</div>
+      ${res.issues.map((i) => `<div class="finding ${i.severity}">${esc(i.message)}</div>`).join('')}
+      ${p.notes.length ? `<div class="note-box" style="margin-top:8px">
+        ${p.notes.map(esc).join('<br>')}</div>` : ''}`;
+  }, e.currentTarget);
+
+  if ($('#jr-apply')) $('#jr-apply').onclick = (e) => run(async () => {
+    const res = await api(`/projects/${S.project.id}/journal/apply`, { method: 'POST', body: {
+      profile: $('#jr-profile').value } });
+    $('#jr-out').innerHTML = `<div class="note-box ok"><strong>Aturan naskah diperbarui</strong>
+      ${esc(res.note)}</div>`;
+    await refreshProject(S.project.id);
+  }, e.currentTarget);
+
+  if ($('#tr-go')) $('#tr-go').onclick = (e) => run(async () => {
+    const text = $('#tr-id').value.trim();
+    if (!text) return toast('Teks bahasa Indonesia masih kosong.', true);
+    const res = await api(`/projects/${S.project.id}/translate`, { method: 'POST', body: {
+      text, direction: 'id-en' } });
+    if (res.text) $('#tr-en').value = res.text;
+    $('#tr-out').innerHTML = res.text
+      ? `<div class="note-box ok"><strong>Terjemahan (${esc(res.source)})</strong>${esc(res.text)}
+         ${res.meta.note ? `<div class="meta" style="margin-top:6px">${esc(res.meta.note)}</div>` : ''}</div>`
+      : `<div class="note-box warn"><strong>${esc(res.meta.note || '')}</strong>
+         <pre class="out" style="margin-top:6px">${esc(res.meta.glossary || '')}</pre></div>`;
+  }, e.currentTarget);
+
+  if ($('#tr-glossary')) $('#tr-glossary').onclick = (e) => run(async () => {
+    const field = S.project.field_of_study || '';
+    const res = await api(`/glossary?field_of_study=${encodeURIComponent(field)}`);
+    const entries = Object.entries(res.terms);
+    $('#tr-out').innerHTML = `<div class="note-box">
+      <strong>${res.count} padanan istilah${field ? ` (termasuk bidang ${esc(field)})` : ''}</strong>
+      Bidang tersedia: ${res.fields_available.map(esc).join(', ')}</div>
+      <div class="scroll-x" style="margin-top:8px;max-height:300px;overflow-y:auto"><table>
+      <thead><tr><th>Indonesia</th><th>Inggris</th></tr></thead><tbody>
+      ${entries.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}
+      </tbody></table></div>`;
+  }, e.currentTarget);
+
+  if ($('#tr-check')) $('#tr-check').onclick = (e) => run(async () => {
+    const indonesian = $('#tr-id').value.trim();
+    const english = $('#tr-en').value.trim();
+    if (!indonesian || !english) return toast('Isi kedua versi teks lebih dahulu.', true);
+    const res = await api(`/projects/${S.project.id}/terminology`, { method: 'POST', body: {
+      indonesian, english } });
+    $('#tr-out').innerHTML = `<div class="note-box ${res.passed ? 'ok' : 'warn'}">
+      <strong>${res.terms_consistent} dari ${res.terms_detected} istilah teknis konsisten</strong>
+      ${res.passed ? 'Seluruh padanan sudah sesuai glosarium.'
+        : 'Istilah di bawah perlu disamakan agar tidak terbaca sebagai ketidakcermatan.'}</div>
+      ${res.issues.map((i) => `<div class="finding sedang">${esc(i.message)}</div>`).join('')}`;
+  }, e.currentTarget);
+
   if ($('#pb-abstract')) $('#pb-abstract').onclick = (e) => run(async () => {
     const res = await api(`/projects/${S.project.id}/abstract`, { method: 'POST', body: {} });
     $('#pb-out').innerHTML = `<div class="note-box"><strong>Abstrak terstruktur
@@ -1203,6 +1363,32 @@ async function viewExport() {
     $('#pb-out').innerHTML = `<div class="note-box"><strong>Cover letter
       (${esc(res.source)})</strong><pre class="out">${esc(res.text)}</pre></div>`;
   }, e.currentTarget);
+}
+
+function conversionHtml(plan) {
+  return `
+    <div class="metrics" style="margin-bottom:10px">
+      <div class="metric"><div class="v">${num(plan.source_words)}</div><div class="k">kata naskah asal</div></div>
+      <div class="metric"><div class="v">${num(plan.target_words)}</div><div class="k">target artikel</div></div>
+      <div class="metric"><div class="v">${plan.overall_compression <= 1
+        ? Math.round(plan.overall_compression * 100) + '%' : '—'}</div>
+        <div class="k">${plan.overall_compression <= 1 ? 'tersisa setelah dipadatkan'
+          : 'naskah lebih pendek dari target'}</div></div>
+      <div class="metric"><div class="v">${plan.citekeys.length}</div><div class="k">sitasi ikut</div></div>
+    </div>
+    ${plan.warnings.map((w) => `<div class="finding sedang">${esc(w)}</div>`).join('')}
+    <div class="scroll-x" style="margin-top:8px"><table>
+      <thead><tr><th>Bagian artikel</th><th style="width:90px">Anggaran</th>
+        <th style="width:90px">Dari</th><th>Bahan dari naskah</th></tr></thead>
+      <tbody>${plan.sections.map((s) => `<tr>
+        <td><strong>${esc(s.target)}</strong></td>
+        <td>${num(s.target_words)} kata</td>
+        <td>${num(s.source_words)} kata</td>
+        <td>${s.sources.map((x) => `<span class="tag">${esc(x.number)} ${esc(x.title)}</span>`).join(' ')
+          || '<span class="meta">belum ada bahan</span>'}</td></tr>`).join('')}</tbody></table></div>
+    ${plan.dropped.length ? `<div class="note-box warn" style="margin-top:10px">
+      <strong>Tidak dibawa ke artikel</strong>
+      ${plan.dropped.map((d) => `${esc(d.title)} (${d.word_count} kata) — ${esc(d.reason)}`).join('<br>')}</div>` : ''}`;
 }
 
 /* ------------------------------------------------- Dashboard & batas */

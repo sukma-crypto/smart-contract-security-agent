@@ -617,6 +617,107 @@ def _abstract_skeleton(manuscript: Manuscript, sections: list[str], max_words: i
     return "\n".join(lines)
 
 
+def translate(
+    text: str, direction: str = "id-en", field_of_study: str | None = None
+) -> ServiceResult:
+    """Penerjemahan dwibahasa dengan konsistensi istilah teknis dijaga glosarium.
+
+    Padanan istilah tidak diserahkan ke model: ia disodorkan sebagai daftar
+    wajib, lalu hasil terjemahan diperiksa ulang terhadap daftar itu.
+    """
+    from ..glossary import check_translation, glossary_hint
+
+    hint = glossary_hint(text, field_of_study)
+    system = prompts.render(prompts.TRANSLATE)
+    arah = "Indonesia ke Inggris" if direction == "id-en" else "Inggris ke Indonesia"
+    user = f"Arah terjemahan: {arah}\n\n{hint}\n\nTeks:\n{text}"
+
+    try:
+        completion = _call(system, user, max_tokens=1400, temperature=0.2)
+    except LLMUnavailable:
+        from ..glossary import apply_glossary
+
+        pairs = apply_glossary(text, field_of_study)
+        return ServiceResult(
+            text="",
+            source="deterministik",
+            meta={
+                "glossary": pairs,
+                "note": (
+                    "Penerjemahan kalimat memerlukan model bahasa. Yang bisa dipastikan "
+                    "tanpa model adalah padanan istilah teknisnya, dan daftar itu ada di "
+                    "bawah — pakai sebagai acuan saat menyusun abstrak bahasa Inggris."
+                ),
+            },
+        )
+
+    translated, verdict = guard_output(completion.text, kind="terjemahan")
+    check = (
+        check_translation(text, translated, field_of_study)
+        if direction == "id-en"
+        else check_translation(translated, text, field_of_study)
+    )
+    return ServiceResult(
+        text=translated,
+        verdict=verdict,
+        meta={
+            "model": completion.model,
+            "terminology": check,
+            "note": (
+                "Seluruh istilah teknis konsisten dengan glosarium."
+                if check["passed"]
+                else f"{len(check['issues'])} istilah teknis belum memakai padanan baku."
+            ),
+        },
+    )
+
+
+def condense_section(
+    text: str, section_name: str, budget_words: int, source_section: str = ""
+) -> ServiceResult:
+    """Padatkan satu bagian tugas akhir menjadi bagian artikel."""
+    verdict = guard_request(text, kind="konversi")
+    if not verdict.allowed:
+        raise GuardrailError(verdict)
+
+    system = prompts.render(prompts.CONDENSE)
+    user = (
+        f"Bagian artikel yang dituju: {section_name}\n"
+        f"Asal bagian pada naskah: {source_section or 'tidak disebutkan'}\n"
+        f"Anggaran kata: {budget_words}\n\nTeks sumber:\n{text}"
+    )
+    try:
+        completion = _call(system, user, max_tokens=min(budget_words * 3, 3000))
+    except LLMUnavailable:
+        return ServiceResult(
+            text="",
+            source="deterministik",
+            meta={
+                "source_words": len(text.split()),
+                "budget_words": budget_words,
+                "note": (
+                    "Pemadatan kalimat memerlukan model bahasa. Rencana konversi, "
+                    "anggaran kata tiap bagian, serta pemindahan isi dan pustaka sudah "
+                    "dikerjakan tanpa model."
+                ),
+            },
+        )
+
+    condensed, output_verdict = guard_output(
+        completion.text, kind="konversi", max_words=int(budget_words * 1.2)
+    )
+    return ServiceResult(
+        text=condensed,
+        verdict=output_verdict,
+        meta={
+            "source_words": len(text.split()),
+            "result_words": len(condensed.split()),
+            "budget_words": budget_words,
+            "model": completion.model,
+        },
+    )
+
+
 def _extract_json(text: str):
     """Ambil JSON dari keluaran model yang mungkin dibungkus blok kode."""
     cleaned = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()

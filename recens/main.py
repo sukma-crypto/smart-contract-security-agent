@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__, db
-from .api import analysis, billing, library, projects, review, writing
+from .api import analysis, billing, library, projects, publication, review, writing
 from .config import get_settings
 from .core.citations.sources import OFFICIAL_SOURCES
 from .core.llm.providers import get_provider
@@ -46,6 +46,7 @@ for router in (
     writing.router,
     analysis.router,
     review.router,
+    publication.router,
     billing.router,
 ):
     app.include_router(router, prefix="/api")

@@ -100,6 +100,8 @@ COSTS: dict[str, int] = {
     "respon_reviewer": 6,
     "abstrak_terstruktur": 4,
     "pencarian_literatur": 1,
+    "terjemahan": 3,
+    "konversi_naskah": 8,
     # Berjalan lokal, tidak menagih kredit:
     "analisis_data": 0,
     "uji_instrumen": 0,
@@ -108,6 +110,10 @@ COSTS: dict[str, int] = {
     "auto_format": 0,
     "ekspor": 0,
     "sitasi": 0,
+    "impor_komentar": 0,
+    "rencana_konversi": 0,
+    "cek_jurnal": 0,
+    "glosarium": 0,
 }
 
 

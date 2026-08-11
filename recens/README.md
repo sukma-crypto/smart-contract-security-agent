@@ -35,6 +35,8 @@ diakali. Karena itu keduanya ditegakkan sebagai kode:
 | Angka hasil dihitung mesin, bukan model | Setiap angka pada narasi ditelusuri balik ke hasil perhitungan. Angka yang tidak tertelusur membatalkan narasi, dan draf deterministik dipakai sebagai gantinya — [`core/stats/narrative.py`](core/stats/narrative.py) |
 | Hasil tidak signifikan dilaporkan apa adanya | Tidak ada parameter yang bisa membuat sebuah uji "diterima". Ketidaksignifikanan justru masuk ke `findings` dan `warnings` — [`core/stats/engine.py`](core/stats/engine.py) |
 | Kutipan informan benar-benar diucapkan | Tiap segmen kualitatif diverifikasi ada di transkrip; yang tidak ditemukan tidak disimpan — [`core/stats/qualitative.py`](core/stats/qualitative.py) |
+| Komentar pembimbing tidak ditempel ke bagian yang keliru | Penautan memakai teks yang benar-benar disorot; komentar yang tidak meyakinkan dibiarkan tanpa lokasi — [`core/annotations.py`](core/annotations.py) |
+| Padanan istilah teknis tidak diserahkan ke model | Glosarium per bidang ilmu disodorkan sebagai daftar wajib, lalu hasil terjemahan diperiksa ulang terhadapnya — [`core/glossary.py`](core/glossary.py) |
 
 ### Batas produk yang melekat
 
@@ -73,7 +75,7 @@ sedang aktif.
 Menjalankan pengujian:
 
 ```bash
-python -m pytest recens/tests -q      # 144 pengujian
+python -m pytest recens/tests -q      # 175 pengujian
 ```
 
 ---
@@ -172,6 +174,38 @@ dikeluarkan dalam gaya apa pun tanpa menyunting isinya, dan daftar pustaka tidak
 pernah lepas sinkron. Gaya numerik otomatis urut kemunculan, gaya penulis-tahun
 urut abjad.
 
+### Bimbingan & sidang
+
+**Pelacak Bimbingan** membaca coretan dosen menjadi daftar revisi berstatus.
+PDF beranotasi dibaca lewat `/Annots`, dan teks yang benar-benar disorot diambil
+dari `QuadPoints` — potongan naskah asli itulah jangkar yang dipakai untuk
+menautkan komentar ke bagiannya, bukan tebakan. Dokumen Word berkomentar dibaca
+langsung dari `word/comments.xml` beserta rentang teks yang dirujuknya.
+
+Komentar yang tidak dapat ditautkan dengan yakin dicatat tanpa lokasi, karena
+menempelkannya ke bagian yang keliru lebih menyesatkan daripada membiarkannya
+kosong.
+
+### Publikasi
+
+**Konversi Naskah** memetakan tugas akhir ke struktur IMRAD secara
+deterministik: bagian mana masuk ke mana, berapa anggaran kata tiap bagian,
+serta tabel dan sitasi mana yang ikut. Rencananya ditampilkan lebih dahulu —
+termasuk apa yang tidak dibawa dan alasannya — sebelum proyek artikel baru
+dibangun. Naskah asli tidak diubah. Bab "Hasil dan Pembahasan" yang digabung
+ditandai, karena IMRAD memisahkan keduanya.
+
+**Template Jurnal Tujuan** memeriksa kesiapan naskah terhadap ketentuan jurnal:
+struktur bagian wajib (dengan padanan lintas bahasa, sehingga naskah Indonesia
+tetap terbaca memenuhi struktur jurnal berbahasa Inggris), gaya sitasi, batas
+kata, dan batas abstrak. Profil jurnal bisa dijadikan `RuleSet` yang mengikat,
+sehingga satu mesin format melayani skripsi maupun artikel.
+
+**Dua Bahasa** menjaga konsistensi istilah teknis lewat glosarium 88 istilah
+metodologi ditambah istilah tujuh bidang ilmu. Istilah majemuk dikenali utuh
+("uji validitas" satu istilah, bukan "uji" + "validitas"), dan hasil terjemahan
+diperiksa ulang: istilah yang berubah padanan di tengah naskah ditandai.
+
 ### Ekspor
 
 - **DOCX** — margin, huruf, spasi, penomoran romawi untuk bagian awal dan arab
@@ -194,6 +228,10 @@ recens/
 │   ├── worktypes.py            9 jenis karya, matriks langkah & perlakuan
 │   ├── manuscript.py           naskah terstruktur: bab, blok, caption, penanda
 │   ├── guidelines.py           pembacaan pedoman menjadi RuleSet
+│   ├── annotations.py          coretan dosen (PDF/DOCX) menjadi daftar revisi
+│   ├── conversion.py           pemetaan tugas akhir ke struktur IMRAD
+│   ├── journals.py             profil jurnal tujuan dan cek kesiapan submisi
+│   ├── glossary.py             glosarium dwibahasa per bidang ilmu
 │   ├── render.py               penanda → sitasi dan acuan silang
 │   ├── retrieval.py            BM25 lokal untuk Tanya Jurnal
 │   ├── credits.py              kuota dan durasi — bukan penguncian fitur
@@ -204,7 +242,7 @@ recens/
 │   └── llm/                    penyedia, prompt, layanan, dan penjaga batas
 ├── api/                        router per langkah alur kerja
 ├── web/                        ruang kerja (HTML/CSS/JS tanpa build)
-└── tests/                      144 pengujian
+└── tests/                      175 pengujian
 ```
 
 Antarmuka web adalah satu halaman tanpa tahap build: buka `/`, dan seluruh
@@ -236,8 +274,9 @@ Hal-hal berikut sengaja dinyatakan terbuka, bukan disamarkan:
 - **Cek kemiripan** membandingkan naskah terhadap sumber di pustaka proyek, bukan
   terhadap seluruh internet. Angkanya adalah batas bawah dan bukan pengganti
   hasil sistem resmi kampus.
-- **OCR** untuk PDF hasil pindaian dan foto tulisan tangan belum tersambung;
-  halaman tanpa lapisan teks akan terbaca kosong.
+- **OCR** untuk PDF hasil pindaian dan foto tulisan tangan belum tersambung.
+  Halaman tanpa lapisan teks terbaca kosong, dan impor coretan dari foto ditolak
+  dengan terus terang alih-alih menghasilkan tebakan.
 - **Estimasi PLS-SEM** tetap dijalankan di SmartPLS atau Lisrel. Recens membaca
   keluarannya lalu menghitung AVE dan CR dari nilai loading tersebut.
 - **Cronbach's Alpha pada tabel PLS** tidak dapat diturunkan dari nilai loading,
