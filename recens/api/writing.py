@@ -48,16 +48,22 @@ class CiteRequest(BaseModel):
 
 @router.post("/projects/{project_id}/continue")
 def continue_sentence(
-    project_id: int, payload: ContinueRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: ContinueRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Lanjutan kalimat — menghapus kebuntuan halaman kosong."""
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     work_type = project_work_type(project)
 
     section_title = ""
     if payload.section_id:
+        # Bagian dicari di dalam proyek ini saja; tanpa itu, judul bab milik
+        # proyek orang lain bisa terbaca lewat nomor yang ditebak.
         row = db.fetch_one(
-            conn, "SELECT title FROM sections WHERE id = ?", (payload.section_id,)
+            conn,
+            "SELECT title FROM sections WHERE id = ? AND project_id = ?",
+            (payload.section_id, project_id),
         )
         section_title = row["title"] if row else ""
 
@@ -76,10 +82,11 @@ def continue_sentence(
 
 @router.post("/projects/{project_id}/paraphrase")
 def paraphrase(
-    project_id: int, payload: ParaphraseRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: ParaphraseRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Parafrase disertai penjelasan alasan perubahan."""
-    project = get_project(project_id, conn)
     result = guard(services.paraphrase, payload.text, payload.instruction)
     if result.source == "model":
         charge_for(conn, project, "parafrase")
@@ -88,10 +95,11 @@ def paraphrase(
 
 @router.post("/projects/{project_id}/language")
 def academic_language(
-    project_id: int, payload: LanguageRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: LanguageRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Penyuntingan sesuai kaidah PUEBI/EYD."""
-    project = get_project(project_id, conn)
     result = services.academic_language(payload.text)
     if result.source == "model":
         charge_for(conn, project, "bahasa_akademik")
@@ -119,10 +127,12 @@ def get_template(role: str) -> dict:
 
 @router.post("/projects/{project_id}/outline/generate")
 def generate_outline(
-    project_id: int, payload: OutlineRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: OutlineRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Bangun kerangka mengikuti struktur yang berlaku pada jenis karya ini."""
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     work_type = project_work_type(project)
     target = payload.target_words or project["target_words"] or work_type.default_target_words
 
@@ -161,15 +171,16 @@ def generate_outline(
 
 @router.post("/projects/{project_id}/cite-marker")
 def build_cite_marker(
-    project_id: int, payload: CiteRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: CiteRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Bentuk penanda sitasi yang siap disisipkan ke naskah.
 
     Penanda hanya dibuat untuk citekey yang benar-benar ada di pustaka proyek,
     sehingga sitasi dalam teks tidak pernah menunjuk sumber yang tidak ada.
     """
-    get_project(project_id, conn)
-    entries = entries_by_citekey(conn, project_id)
+    entries = entries_by_citekey(conn, project["id"])
     if payload.citekey not in entries:
         raise HTTPException(
             404,

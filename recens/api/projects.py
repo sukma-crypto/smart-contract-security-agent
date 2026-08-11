@@ -29,7 +29,14 @@ from ..core.worktypes import (
     get_work_type,
     requires_data_step,
 )
-from .deps import get_conn, get_project, project_work_type
+from .deps import (
+    current_account,
+    get_conn,
+    get_project,
+    owned_block,
+    owned_section,
+    project_work_type,
+)
 
 router = APIRouter(tags=["proyek"])
 
@@ -45,7 +52,6 @@ class ProjectCreate(BaseModel):
     target_words: int | None = None
     deadline: str | None = None
     citation_style: str | None = None
-    account_id: int | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -140,8 +146,17 @@ def catalog() -> dict:
 
 
 @router.post("/projects", status_code=201)
-def create_project(payload: ProjectCreate, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
-    """Langkah 1 — pilihan jenis karya menentukan struktur, batas, dan langkah."""
+def create_project(
+    payload: ProjectCreate,
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
+) -> dict:
+    """Langkah 1 — pilihan jenis karya menentukan struktur, batas, dan langkah.
+
+    Pemiliknya diambil dari sesi yang sedang berjalan, bukan dari kiriman.
+    Selama ``account_id`` masih boleh dititipkan lewat badan permintaan, siapa
+    pun bisa menaruh proyek atas nama orang lain.
+    """
     try:
         work_type = get_work_type(payload.work_type)
     except ValueError as exc:
@@ -151,17 +166,16 @@ def create_project(payload: ProjectCreate, conn: sqlite3.Connection = Depends(ge
     except ValueError as exc:
         raise HTTPException(400, f"Jenis penelitian '{payload.research_type}' tidak dikenal.") from exc
 
-    if payload.account_id:
-        try:
-            credits.check_project_quota(conn, payload.account_id)
-        except credits.QuotaExceeded as exc:
-            raise HTTPException(402, str(exc)) from exc
+    try:
+        credits.check_project_quota(conn, account["id"])
+    except credits.QuotaExceeded as exc:
+        raise HTTPException(402, str(exc)) from exc
 
     target = payload.target_words or work_type.default_target_words
     project_id = db.insert(
         conn,
         "projects",
-        account_id=payload.account_id,
+        account_id=account["id"],
         name=payload.name,
         work_type=work_type.key,
         research_type=research_type.value,
@@ -173,21 +187,26 @@ def create_project(payload: ProjectCreate, conn: sqlite3.Connection = Depends(ge
         updated_at=db.now(),
     )
     build_default_outline(conn, project_id, work_type, target)
-    return get_project_detail(project_id, conn)
+    return _project_detail(conn, dict(db.fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project_id,))))
 
 
 @router.get("/projects")
 def list_projects(
-    account_id: int | None = None, conn: sqlite3.Connection = Depends(get_conn)
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
 ) -> list[dict]:
-    sql = "SELECT * FROM projects"
-    params: tuple = ()
-    if account_id:
-        sql += " WHERE account_id = ?"
-        params = (account_id,)
-    sql += " ORDER BY updated_at DESC"
+    """Hanya proyek milik akun yang sedang masuk.
+
+    Penyaringnya bukan parameter kueri — kalau bisa disetel dari luar, ia bukan
+    penyaring keamanan, melainkan saran.
+    """
     projects = []
-    for row in db.fetch_all(conn, sql, params):
+    rows = db.fetch_all(
+        conn,
+        "SELECT * FROM projects WHERE account_id = ? ORDER BY updated_at DESC",
+        (account["id"],),
+    )
+    for row in rows:
         project = dict(row)
         manuscript = load_manuscript(conn, project["id"])
         work_type = get_work_type(project["work_type"])
@@ -203,8 +222,20 @@ def list_projects(
 
 
 @router.get("/projects/{project_id}")
-def get_project_detail(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
-    project = get_project(project_id, conn)
+def get_project_detail(
+    conn: sqlite3.Connection = Depends(get_conn), project: dict = Depends(get_project)
+) -> dict:
+    return _project_detail(conn, project)
+
+
+def _project_detail(conn: sqlite3.Connection, project: dict) -> dict:
+    """Rincian proyek beserta hitungan turunannya.
+
+    Terpisah dari rutenya karena dipanggil juga setelah membuat dan mengubah
+    proyek; memanggil fungsi rute secara langsung akan melewati resolusi
+    kebergantungan dan justru mematikan pemeriksaan kepemilikannya.
+    """
+    project_id = project["id"]
     work_type = get_work_type(project["work_type"])
     research_type = ResearchType(project["research_type"])
     manuscript = load_manuscript(conn, project_id)
@@ -267,9 +298,10 @@ def get_project_detail(project_id: int, conn: sqlite3.Connection = Depends(get_c
 
 @router.patch("/projects/{project_id}")
 def update_project(
-    project_id: int, payload: ProjectUpdate, conn: sqlite3.Connection = Depends(get_conn)
+    payload: ProjectUpdate,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
-    project = get_project(project_id, conn)
     values = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
     if "research_type" in values:
         try:
@@ -279,13 +311,15 @@ def update_project(
     if values:
         values["updated_at"] = db.now()
         db.update(conn, "projects", project["id"], **values)
-    return get_project_detail(project_id, conn)
+    fresh = db.fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project["id"],))
+    return _project_detail(conn, dict(fresh))
 
 
 @router.delete("/projects/{project_id}", status_code=204)
-def delete_project(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> None:
-    get_project(project_id, conn)
-    conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+def delete_project(
+    conn: sqlite3.Connection = Depends(get_conn), project: dict = Depends(get_project)
+) -> None:
+    conn.execute("DELETE FROM projects WHERE id = ?", (project["id"],))
     conn.commit()
 
 
@@ -293,9 +327,10 @@ def delete_project(project_id: int, conn: sqlite3.Connection = Depends(get_conn)
 
 
 @router.get("/projects/{project_id}/outline")
-def get_outline(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
-    get_project(project_id, conn)
-    manuscript = load_manuscript(conn, project_id)
+def get_outline(
+    conn: sqlite3.Connection = Depends(get_conn), project: dict = Depends(get_project)
+) -> dict:
+    manuscript = load_manuscript(conn, project["id"])
     return {
         "sections": section_outline(manuscript),
         "word_count": manuscript.word_count,
@@ -304,9 +339,10 @@ def get_outline(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -
 
 
 @router.get("/projects/{project_id}/manuscript")
-def get_manuscript(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
-    get_project(project_id, conn)
-    manuscript = load_manuscript(conn, project_id)
+def get_manuscript(
+    conn: sqlite3.Connection = Depends(get_conn), project: dict = Depends(get_project)
+) -> dict:
+    manuscript = load_manuscript(conn, project["id"])
 
     def dump(section) -> dict:
         return {
@@ -333,7 +369,7 @@ def get_manuscript(project_id: int, conn: sqlite3.Connection = Depends(get_conn)
         }
 
     return {
-        "project_id": project_id,
+        "project_id": project["id"],
         "sections": [dump(s) for s in manuscript.sections],
         "captions": manuscript.numbered_captions(),
         "citekeys": manuscript.citekeys(),
@@ -343,9 +379,20 @@ def get_manuscript(project_id: int, conn: sqlite3.Connection = Depends(get_conn)
 
 @router.post("/projects/{project_id}/sections", status_code=201)
 def create_section(
-    project_id: int, payload: SectionCreate, conn: sqlite3.Connection = Depends(get_conn)
+    payload: SectionCreate,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
-    get_project(project_id, conn)
+    project_id = project["id"]
+    if payload.parent_id is not None:
+        # Induk harus berada di proyek yang sama, bukan sekadar ada.
+        parent = db.fetch_one(
+            conn,
+            "SELECT id FROM sections WHERE id = ? AND project_id = ?",
+            (payload.parent_id, project_id),
+        )
+        if parent is None:
+            raise HTTPException(404, f"Bagian induk {payload.parent_id} tidak ditemukan.")
     position = payload.position
     if position is None:
         row = db.fetch_one(
@@ -372,30 +419,45 @@ def create_section(
 
 @router.patch("/sections/{section_id}")
 def update_section(
-    section_id: int, payload: SectionUpdate, conn: sqlite3.Connection = Depends(get_conn)
+    section_id: int,
+    payload: SectionUpdate,
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
 ) -> dict:
-    row = db.fetch_one(conn, "SELECT * FROM sections WHERE id = ?", (section_id,))
-    if row is None:
-        raise HTTPException(404, f"Bagian {section_id} tidak ditemukan.")
+    section = owned_section(conn, account["id"], section_id)
     values = payload.model_dump(exclude_none=True)
+    if "parent_id" in values:
+        parent = db.fetch_one(
+            conn,
+            "SELECT id FROM sections WHERE id = ? AND project_id = ?",
+            (values["parent_id"], section["project_id"]),
+        )
+        if parent is None:
+            raise HTTPException(404, f"Bagian induk {values['parent_id']} tidak ditemukan.")
     if values:
         db.update(conn, "sections", section_id, **values)
     return dict(db.fetch_one(conn, "SELECT * FROM sections WHERE id = ?", (section_id,)))
 
 
 @router.delete("/sections/{section_id}", status_code=204)
-def delete_section(section_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> None:
+def delete_section(
+    section_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
+) -> None:
+    owned_section(conn, account["id"], section_id)
     conn.execute("DELETE FROM sections WHERE id = ?", (section_id,))
     conn.commit()
 
 
 @router.post("/sections/{section_id}/blocks", status_code=201)
 def create_block(
-    section_id: int, payload: BlockCreate, conn: sqlite3.Connection = Depends(get_conn)
+    section_id: int,
+    payload: BlockCreate,
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
 ) -> dict:
-    section = db.fetch_one(conn, "SELECT * FROM sections WHERE id = ?", (section_id,))
-    if section is None:
-        raise HTTPException(404, f"Bagian {section_id} tidak ditemukan.")
+    section = owned_section(conn, account["id"], section_id)
     position = payload.position
     if position is None:
         row = db.fetch_one(
@@ -420,11 +482,12 @@ def create_block(
 
 @router.patch("/blocks/{block_id}")
 def update_block(
-    block_id: int, payload: BlockUpdate, conn: sqlite3.Connection = Depends(get_conn)
+    block_id: int,
+    payload: BlockUpdate,
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
 ) -> dict:
-    row = db.fetch_one(conn, "SELECT * FROM blocks WHERE id = ?", (block_id,))
-    if row is None:
-        raise HTTPException(404, f"Blok {block_id} tidak ditemukan.")
+    owned_block(conn, account["id"], block_id)
     values = payload.model_dump(exclude_none=True)
     if "meta" in values:
         values["meta_json"] = json.dumps(values.pop("meta"), ensure_ascii=False)
@@ -436,7 +499,12 @@ def update_block(
 
 
 @router.delete("/blocks/{block_id}", status_code=204)
-def delete_block(block_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> None:
+def delete_block(
+    block_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
+) -> None:
+    owned_block(conn, account["id"], block_id)
     conn.execute("DELETE FROM blocks WHERE id = ?", (block_id,))
     conn.commit()
 
@@ -446,9 +514,11 @@ def delete_block(block_id: int, conn: sqlite3.Connection = Depends(get_conn)) ->
 
 @router.post("/projects/{project_id}/versions", status_code=201)
 def create_version(
-    project_id: int, payload: VersionCreate, conn: sqlite3.Connection = Depends(get_conn)
+    payload: VersionCreate,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
-    get_project(project_id, conn)
+    project_id = project["id"]
     manuscript = load_manuscript(conn, project_id)
     data = snapshot(manuscript)
     version_id = db.insert(
@@ -464,21 +534,25 @@ def create_version(
 
 
 @router.get("/projects/{project_id}/versions")
-def list_versions(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
+def list_versions(
+    conn: sqlite3.Connection = Depends(get_conn), project: dict = Depends(get_project)
+) -> list[dict]:
     rows = db.fetch_all(
         conn,
         "SELECT id, label, word_count, created_at FROM versions WHERE project_id = ? "
         "ORDER BY id DESC",
-        (project_id,),
+        (project["id"],),
     )
     return [dict(row) for row in rows]
 
 
 @router.post("/projects/{project_id}/versions/{version_id}/restore")
 def restore_version(
-    project_id: int, version_id: int, conn: sqlite3.Connection = Depends(get_conn)
+    version_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
-    get_project(project_id, conn)
+    project_id = project["id"]
     row = db.fetch_one(
         conn, "SELECT * FROM versions WHERE id = ? AND project_id = ?", (version_id, project_id)
     )
@@ -501,9 +575,11 @@ def restore_version(
 
 
 @router.get("/projects/{project_id}/dashboard")
-def dashboard(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+def dashboard(
+    conn: sqlite3.Connection = Depends(get_conn), project: dict = Depends(get_project)
+) -> dict:
     """Status tiap bab, jumlah kata, dan sisa waktu menuju target sidang."""
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     work_type = project_work_type(project)
     manuscript = load_manuscript(conn, project_id)
     sections = section_outline(manuscript)

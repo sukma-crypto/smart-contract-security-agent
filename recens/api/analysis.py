@@ -17,7 +17,15 @@ from pydantic import BaseModel, Field
 from .. import db
 from ..core.llm import services
 from ..core.stats import engine, methodology, narrative, qualitative, readers
-from .deps import charge_for, get_conn, get_project, upload_path
+from .deps import (
+    charge_for,
+    current_account,
+    get_conn,
+    get_project,
+    owned_analysis,
+    owned_section,
+    upload_path,
+)
 
 router = APIRouter(tags=["analisis"])
 
@@ -116,13 +124,13 @@ def list_methods() -> dict:
 
 @router.post("/projects/{project_id}/datasets", status_code=201)
 async def upload_dataset(
-    project_id: int,
     file: UploadFile = File(...),
     kind: str = Form(""),
     conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Unggah data penelitian: SPSS, Excel, CSV, atau transkrip wawancara."""
-    get_project(project_id, conn)
+    project_id = project["id"]
     filename = file.filename or "data.csv"
     destination = upload_path(project_id, filename, "data")
     destination.write_bytes(await file.read())
@@ -155,28 +163,52 @@ async def upload_dataset(
 
 
 @router.get("/projects/{project_id}/datasets")
-def list_datasets(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
-    get_project(project_id, conn)
+def list_datasets(
+    conn: sqlite3.Connection = Depends(get_conn), project: dict = Depends(get_project)
+) -> list[dict]:
     rows = db.fetch_all(
-        conn, "SELECT * FROM datasets WHERE project_id = ? ORDER BY id DESC", (project_id,)
+        conn, "SELECT * FROM datasets WHERE project_id = ? ORDER BY id DESC", (project["id"],)
     )
     return db.rows_to_dicts(rows, ("meta_json",))
 
 
 @router.get("/datasets/{dataset_id}/preview")
 def preview_dataset(
-    dataset_id: int, rows: int = 10, conn: sqlite3.Connection = Depends(get_conn)
+    dataset_id: int,
+    rows: int = 10,
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
 ) -> dict:
-    dataset = _get_dataset(conn, dataset_id)
+    row = db.fetch_one(
+        conn,
+        "SELECT d.* FROM datasets d JOIN projects p ON p.id = d.project_id "
+        "WHERE d.id = ? AND p.account_id = ?",
+        (dataset_id, account["id"]),
+    )
+    if row is None:
+        raise HTTPException(404, f"Data {dataset_id} tidak ditemukan.")
+    dataset = _existing_file(dict(row))
     loaded = readers.load(dataset["path"])
     return loaded.preview(rows)
 
 
-def _get_dataset(conn: sqlite3.Connection, dataset_id: int) -> dict:
-    row = db.fetch_one(conn, "SELECT * FROM datasets WHERE id = ?", (dataset_id,))
+def _get_dataset(conn: sqlite3.Connection, project_id: int, dataset_id: int) -> dict:
+    """Data hanya bisa diambil dari dalam proyeknya sendiri.
+
+    Menerima ``dataset_id`` apa adanya berarti satu proyek bisa menjalankan uji
+    statistik atas data penelitian proyek lain — dan hasilnya ikut terbaca.
+    """
+    row = db.fetch_one(
+        conn,
+        "SELECT * FROM datasets WHERE id = ? AND project_id = ?",
+        (dataset_id, project_id),
+    )
     if row is None:
-        raise HTTPException(404, f"Data {dataset_id} tidak ditemukan.")
-    dataset = dict(row)
+        raise HTTPException(404, f"Data {dataset_id} tidak ditemukan di proyek ini.")
+    return _existing_file(dict(row))
+
+
+def _existing_file(dataset: dict) -> dict:
     if not Path(dataset["path"]).exists():
         raise HTTPException(410, f"Berkas data '{dataset['filename']}' sudah tidak ada di disk.")
     return dataset
@@ -187,17 +219,19 @@ def _get_dataset(conn: sqlite3.Connection, dataset_id: int) -> dict:
 
 @router.post("/projects/{project_id}/analyses", status_code=201)
 def run_analysis(
-    project_id: int, payload: RunAnalysis, conn: sqlite3.Connection = Depends(get_conn)
+    payload: RunAnalysis,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Jalankan satu uji dan simpan jejaknya agar dapat ditelusuri ulang."""
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     if payload.method not in METHODS:
         raise HTTPException(
             400, f"Uji '{payload.method}' tidak dikenal. Pilihan: {', '.join(METHODS)}."
         )
 
     try:
-        result = _dispatch(conn, payload)
+        result = _dispatch(conn, project_id, payload)
     except engine.AnalysisError as exc:
         raise HTTPException(400, str(exc)) from exc
     except (KeyError, TypeError) as exc:
@@ -237,7 +271,9 @@ def run_analysis(
     }
 
 
-def _dispatch(conn: sqlite3.Connection, payload: RunAnalysis) -> engine.AnalysisResult:
+def _dispatch(
+    conn: sqlite3.Connection, project_id: int, payload: RunAnalysis
+) -> engine.AnalysisResult:
     params = dict(payload.params)
     method = payload.method
 
@@ -251,7 +287,7 @@ def _dispatch(conn: sqlite3.Connection, payload: RunAnalysis) -> engine.Analysis
 
     if payload.dataset_id is None:
         raise HTTPException(400, f"Uji '{method}' memerlukan dataset_id.")
-    dataset = _get_dataset(conn, payload.dataset_id)
+    dataset = _get_dataset(conn, project_id, payload.dataset_id)
     frame = readers.load(dataset["path"]).frame
 
     dispatch = {
@@ -277,26 +313,36 @@ def _dispatch(conn: sqlite3.Connection, payload: RunAnalysis) -> engine.Analysis
 
 
 @router.get("/projects/{project_id}/analyses")
-def list_analyses(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
+def list_analyses(
+    conn: sqlite3.Connection = Depends(get_conn), project: dict = Depends(get_project)
+) -> list[dict]:
     """Jejak analisis: data, langkah, parameter, dan hasil setiap uji."""
-    get_project(project_id, conn)
     rows = db.fetch_all(
-        conn, "SELECT * FROM analyses WHERE project_id = ? ORDER BY id DESC", (project_id,)
+        conn, "SELECT * FROM analyses WHERE project_id = ? ORDER BY id DESC", (project["id"],)
     )
     return db.rows_to_dicts(rows, ("params_json", "result_json"))
 
 
 @router.post("/analyses/{analysis_id}/insert")
 def insert_analysis(
-    analysis_id: int, payload: InsertRequest, conn: sqlite3.Connection = Depends(get_conn)
+    analysis_id: int,
+    payload: InsertRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
 ) -> dict:
-    """Sisipkan tabel dan narasi hasil ke bagian naskah."""
-    row = db.fetch_one(conn, "SELECT * FROM analyses WHERE id = ?", (analysis_id,))
-    if row is None:
-        raise HTTPException(404, f"Analisis {analysis_id} tidak ditemukan.")
-    section = db.fetch_one(conn, "SELECT * FROM sections WHERE id = ?", (payload.section_id,))
-    if section is None:
-        raise HTTPException(404, f"Bagian {payload.section_id} tidak ditemukan.")
+    """Sisipkan tabel dan narasi hasil ke bagian naskah.
+
+    Dua ID datang dari luar sekaligus, dan keduanya harus ditelusuri: analisis
+    ke pemiliknya, bagian ke pemiliknya, lalu keduanya dipastikan berada di
+    proyek yang sama. Tanpa langkah ketiga, hasil uji proyek sendiri masih bisa
+    disisipkan ke naskah proyek orang lain.
+    """
+    row = owned_analysis(conn, account["id"], analysis_id)
+    section = owned_section(conn, account["id"], payload.section_id)
+    if section["project_id"] != row["project_id"]:
+        raise HTTPException(
+            400, "Bagian tujuan berada di proyek lain. Sisipkan ke bagian dalam proyek yang sama."
+        )
 
     data = json.loads(row["result_json"])
     result = engine.AnalysisResult(
@@ -343,14 +389,15 @@ def insert_analysis(
 
 @router.post("/projects/{project_id}/analyses/pasted", status_code=201)
 def parse_pasted(
-    project_id: int, payload: PastedOutput, conn: sqlite3.Connection = Depends(get_conn)
+    payload: PastedOutput,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Baca tabel output yang ditempel dari SPSS, SmartPLS, Lisrel, atau R.
 
     Untuk berkas .spv dan tangkapan layar, jalur inilah yang dipakai: angkanya
     distrukturkan lalu dinarasikan, tanpa diubah.
     """
-    get_project(project_id, conn)
     table = readers.parse_pasted_table(payload.text)
     if not table["rows"]:
         raise HTTPException(400, "Tidak ada baris tabel yang bisa dibaca dari teks tersebut.")
@@ -407,11 +454,12 @@ def sample_size(payload: SampleSizeRequest) -> dict:
 
 @router.post("/projects/{project_id}/qualitative/suggest")
 def suggest_codes(
-    project_id: int, payload: CodeSuggestRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: CodeSuggestRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Usulkan kode awal dari pola yang benar-benar berulang di transkrip."""
-    get_project(project_id, conn)
-    dataset = _get_dataset(conn, payload.dataset_id)
+    dataset = _get_dataset(conn, project["id"], payload.dataset_id)
     frame = readers.load(dataset["path"]).frame
     try:
         candidates = qualitative.suggest_codes(frame, top_k=payload.top_k)
@@ -429,11 +477,13 @@ def suggest_codes(
 
 @router.post("/projects/{project_id}/qualitative/apply")
 def apply_codes(
-    project_id: int, payload: ApplyCodeRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: ApplyCodeRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Tandai giliran bicara yang memuat tiap kode, lalu verifikasi kutipannya."""
-    get_project(project_id, conn)
-    dataset = _get_dataset(conn, payload.dataset_id)
+    project_id = project["id"]
+    dataset = _get_dataset(conn, project_id, payload.dataset_id)
     loaded = readers.load(dataset["path"])
     transcript = "\n".join(str(v) for v in loaded.frame.get("ucapan", []))
 
@@ -456,11 +506,12 @@ def apply_codes(
 
 @router.post("/projects/{project_id}/qualitative/themes")
 def build_themes(
-    project_id: int, payload: ThemeRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: ThemeRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Susun tema dari kode, lengkap dengan matriks triangulasi sumber."""
-    get_project(project_id, conn)
-    segments = qualitative.load_segments(conn, project_id)
+    segments = qualitative.load_segments(conn, project["id"])
     if not segments:
         raise HTTPException(400, "Belum ada segmen berkode. Jalankan pengodean lebih dahulu.")
     themes = qualitative.build_themes(segments, payload.theme_map)
@@ -472,7 +523,8 @@ def build_themes(
 
 
 @router.get("/projects/{project_id}/qualitative/segments")
-def list_segments(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
-    get_project(project_id, conn)
-    segments = qualitative.load_segments(conn, project_id)
+def list_segments(
+    conn: sqlite3.Connection = Depends(get_conn), project: dict = Depends(get_project)
+) -> dict:
+    segments = qualitative.load_segments(conn, project["id"])
     return {"count": len(segments), "segments": [s.to_dict() for s in segments]}

@@ -21,8 +21,10 @@ from ..core.llm import services
 from ..core.manuscript import load_manuscript
 from .deps import (
     charge_for,
+    current_account,
     get_conn,
     get_project,
+    owned_revision,
     project_rules,
     project_work_type,
     upload_path,
@@ -85,12 +87,12 @@ class ReviewerResponseRequest(BaseModel):
 
 @router.post("/projects/{project_id}/checks")
 def run_checks(
-    project_id: int,
     kinds: str = "all",
     conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Jalankan pemeriksaan naskah sebelum diserahkan."""
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     work_type = project_work_type(project)
     rules = project_rules(conn, project)
     manuscript = load_manuscript(conn, project_id)
@@ -173,11 +175,12 @@ def _summarize(results: dict) -> dict:
 
 @router.get("/projects/{project_id}/checks")
 def check_history(
-    project_id: int, kind: str | None = None, conn: sqlite3.Connection = Depends(get_conn)
+    kind: str | None = None,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> list[dict]:
-    get_project(project_id, conn)
     sql = "SELECT * FROM checks WHERE project_id = ?"
-    params: list = [project_id]
+    params: list = [project["id"]]
     if kind:
         sql += " AND kind = ?"
         params.append(kind)
@@ -190,14 +193,15 @@ def check_history(
 
 @router.post("/projects/{project_id}/revisions", status_code=201)
 def create_revision(
-    project_id: int, payload: RevisionCreate, conn: sqlite3.Connection = Depends(get_conn)
+    payload: RevisionCreate,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Catatan dosen atau reviewer dicatat sebagai daftar tugas berstatus."""
-    get_project(project_id, conn)
     revision_id = db.insert(
         conn,
         "revisions",
-        project_id=project_id,
+        project_id=project["id"],
         section_id=payload.section_id,
         block_id=payload.block_id,
         source=payload.source,
@@ -211,14 +215,15 @@ def create_revision(
 
 @router.get("/projects/{project_id}/revisions")
 def list_revisions(
-    project_id: int, status: str | None = None, conn: sqlite3.Connection = Depends(get_conn)
+    status: str | None = None,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
-    get_project(project_id, conn)
     sql = (
         "SELECT r.*, s.title AS section_title FROM revisions r "
         "LEFT JOIN sections s ON s.id = r.section_id WHERE r.project_id = ?"
     )
-    params: list = [project_id]
+    params: list = [project["id"]]
     if status:
         sql += " AND r.status = ?"
         params.append(status)
@@ -232,11 +237,12 @@ def list_revisions(
 
 @router.patch("/revisions/{revision_id}")
 def update_revision(
-    revision_id: int, payload: RevisionUpdate, conn: sqlite3.Connection = Depends(get_conn)
+    revision_id: int,
+    payload: RevisionUpdate,
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
 ) -> dict:
-    row = db.fetch_one(conn, "SELECT * FROM revisions WHERE id = ?", (revision_id,))
-    if row is None:
-        raise HTTPException(404, f"Revisi {revision_id} tidak ditemukan.")
+    owned_revision(conn, account["id"], revision_id)
     values = payload.model_dump(exclude_none=True)
     if values.get("status") == "selesai":
         values["resolved_at"] = db.now()
@@ -246,12 +252,12 @@ def update_revision(
 
 @router.post("/projects/{project_id}/revisions/import", status_code=201)
 async def import_revisions(
-    project_id: int,
     file: UploadFile = File(...),
     source: str = Form("pembimbing"),
     author: str = Form(""),
     dry_run: bool = Form(False),
     conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Ubah coretan dosen menjadi daftar revisi berstatus.
 
@@ -260,7 +266,7 @@ async def import_revisions(
     ditautkan tetap dicatat tanpa lokasi, karena menempelkannya ke bagian yang
     keliru lebih menyesatkan.
     """
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     filename = file.filename or "catatan.pdf"
     destination = upload_path(project_id, filename, "bimbingan")
     destination.write_bytes(await file.read())
@@ -308,14 +314,15 @@ async def import_revisions(
 
 @router.post("/projects/{project_id}/supervision", status_code=201)
 def add_supervision(
-    project_id: int, payload: SupervisionCreate, conn: sqlite3.Connection = Depends(get_conn)
+    payload: SupervisionCreate,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Riwayat bimbingan: catatan dan capaian tiap sesi, berurutan."""
-    get_project(project_id, conn)
     session_id = db.insert(
         conn,
         "supervision",
-        project_id=project_id,
+        project_id=project["id"],
         met_on=payload.met_on,
         supervisor=payload.supervisor,
         notes=payload.notes,
@@ -326,18 +333,23 @@ def add_supervision(
 
 
 @router.get("/projects/{project_id}/supervision")
-def list_supervision(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
-    get_project(project_id, conn)
+def list_supervision(
+    conn: sqlite3.Connection = Depends(get_conn), project: dict = Depends(get_project)
+) -> list[dict]:
     rows = db.fetch_all(
-        conn, "SELECT * FROM supervision WHERE project_id = ? ORDER BY met_on DESC", (project_id,)
+        conn,
+        "SELECT * FROM supervision WHERE project_id = ? ORDER BY met_on DESC",
+        (project["id"],),
     )
     return [dict(row) for row in rows]
 
 
 @router.post("/projects/{project_id}/defense")
-def defense_mode(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+def defense_mode(
+    conn: sqlite3.Connection = Depends(get_conn), project: dict = Depends(get_project)
+) -> dict:
     """Mode siap sidang: pertanyaan penguji disusun dari titik rawan naskah."""
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     work_type = project_work_type(project)
     if not work_type.defense_mode:
         raise HTTPException(
@@ -376,10 +388,12 @@ def defense_mode(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) 
 
 @router.post("/projects/{project_id}/export")
 def export_project(
-    project_id: int, payload: ExportRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: ExportRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Keluarkan naskah dalam keadaan sudah terformat penuh."""
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     work_type = project_work_type(project)
     exporter = EXPORTERS.get(payload.format)
     if exporter is None:
@@ -447,9 +461,11 @@ def export_project(
 
 @router.get("/projects/{project_id}/export/download")
 def download_export(
-    project_id: int, format: str = "docx", conn: sqlite3.Connection = Depends(get_conn)
+    format: str = "docx",
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> FileResponse:
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     settings = get_settings()
     suffix = {"docx": ".docx", "pdf": ".pdf", "latex": ".tex"}.get(format)
     if suffix is None:
@@ -466,10 +482,11 @@ def download_export(
 
 @router.post("/projects/{project_id}/abstract")
 def structured_abstract(
-    project_id: int, payload: AbstractRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: AbstractRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
-    project = get_project(project_id, conn)
-    manuscript = load_manuscript(conn, project_id)
+    manuscript = load_manuscript(conn, project["id"])
     result = services.structured_abstract(manuscript, payload.sections, payload.max_words)
     if result.source == "model":
         charge_for(conn, project, "abstrak_terstruktur")
@@ -478,9 +495,11 @@ def structured_abstract(
 
 @router.post("/projects/{project_id}/cover-letter")
 def cover_letter(
-    project_id: int, payload: CoverLetterRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: CoverLetterRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     meta = {**payload.model_dump(), "title": project["name"]}
     result = services.cover_letter(meta)
     if result.source == "model":
@@ -500,11 +519,11 @@ def cover_letter(
 
 @router.post("/projects/{project_id}/reviewer-response")
 def reviewer_response(
-    project_id: int,
     payload: ReviewerResponseRequest,
     conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     result = services.reviewer_response(payload.comments)
     if result.source == "model":
         charge_for(conn, project, "respon_reviewer")
@@ -537,9 +556,10 @@ def reviewer_response(
 
 
 @router.get("/projects/{project_id}/submissions")
-def list_submissions(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
-    get_project(project_id, conn)
+def list_submissions(
+    conn: sqlite3.Connection = Depends(get_conn), project: dict = Depends(get_project)
+) -> list[dict]:
     rows = db.fetch_all(
-        conn, "SELECT * FROM submissions WHERE project_id = ? ORDER BY id DESC", (project_id,)
+        conn, "SELECT * FROM submissions WHERE project_id = ? ORDER BY id DESC", (project["id"],)
     )
     return db.rows_to_dicts(rows, ("meta_json",))

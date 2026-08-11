@@ -60,10 +60,12 @@ class TerminologyRequest(BaseModel):
 
 @router.post("/projects/{project_id}/conversion/plan")
 def plan_conversion(
-    project_id: int, payload: ConversionRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: ConversionRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Rencana pemadatan tugas akhir menjadi artikel, sebelum apa pun diubah."""
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     work_type = project_work_type(project)
     if work_type.family.value == "artikel_publikasi":
         raise HTTPException(
@@ -84,11 +86,12 @@ def plan_conversion(
 
 @router.post("/projects/{project_id}/conversion/apply", status_code=201)
 def apply_conversion(
-    project_id: int, payload: ApplyConversionRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: ApplyConversionRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Bangun proyek artikel baru dari rencana konversi."""
-    project = get_project(project_id, conn)
-    manuscript = load_manuscript(conn, project_id)
+    manuscript = load_manuscript(conn, project["id"])
     if not manuscript.word_count:
         raise HTTPException(400, "Naskah sumber masih kosong.")
 
@@ -102,10 +105,11 @@ def apply_conversion(
 
 @router.post("/projects/{project_id}/conversion/condense")
 def condense(
-    project_id: int, payload: CondenseRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: CondenseRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Padatkan satu bagian saja — bukan seluruh artikel sekali jalan."""
-    project = get_project(project_id, conn)
     result = guard(
         services.condense_section,
         payload.text,
@@ -134,10 +138,12 @@ def list_journal_profiles() -> dict:
 
 @router.post("/projects/{project_id}/journal/readiness")
 def journal_readiness(
-    project_id: int, payload: ReadinessRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: ReadinessRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Periksa kesiapan naskah terhadap ketentuan jurnal tujuan."""
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     try:
         profile = journals.get_profile(payload.profile)
     except ValueError as exc:
@@ -151,12 +157,14 @@ def journal_readiness(
 
 @router.post("/projects/{project_id}/journal/apply")
 def apply_journal_profile(
-    project_id: int, payload: ApplyProfileRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: ApplyProfileRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Jadikan ketentuan jurnal sebagai aturan yang mengikat seluruh keluaran."""
     from ..core.guidelines import save_ruleset
 
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     try:
         profile = journals.get_profile(payload.profile)
     except ValueError as exc:
@@ -183,10 +191,11 @@ def apply_journal_profile(
 
 @router.post("/projects/{project_id}/translate")
 def translate(
-    project_id: int, payload: TranslateRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: TranslateRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Terjemahkan dengan padanan istilah teknis yang dijaga glosarium."""
-    project = get_project(project_id, conn)
     if payload.direction not in ("id-en", "en-id"):
         raise HTTPException(400, "Arah terjemahan harus 'id-en' atau 'en-id'.")
     result = services.translate(
@@ -199,10 +208,11 @@ def translate(
 
 @router.post("/projects/{project_id}/terminology")
 def check_terminology(
-    project_id: int, payload: TerminologyRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: TerminologyRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Periksa konsistensi istilah teknis antara abstrak Indonesia dan Inggris."""
-    project = get_project(project_id, conn)
     charge_for(conn, project, "glosarium")
     return glossary.check_translation(
         payload.indonesian, payload.english, field_of_study=project.get("field_of_study")

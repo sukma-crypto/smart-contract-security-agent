@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__, db
-from .api import analysis, billing, library, projects, publication, review, writing
+from .api import analysis, auth, billing, library, projects, publication, review, writing
 from .config import get_settings
 from .core.citations.sources import OFFICIAL_SOURCES
 from .core.llm.providers import get_provider
@@ -41,6 +41,7 @@ app = FastAPI(
 )
 
 for router in (
+    auth.router,
     projects.router,
     library.router,
     writing.router,
@@ -86,9 +87,11 @@ if WEB_DIR.exists():
     def _index() -> FileResponse:
         return FileResponse(WEB_DIR / "index.html")
 
-    # Halaman depan di "/" dan ruang kerja di "/app" dilayani berkas yang sama;
+    # Halaman depan, halaman masuk, dan ruang kerja dilayani berkas yang sama;
     # pemilihannya terjadi di sisi klien. Rute ditulis eksplisit agar alamat
     # yang tidak dikenal tetap menghasilkan 404 yang jujur.
     app.get("/", include_in_schema=False)(_index)
+    app.get("/masuk", include_in_schema=False)(_index)
+    app.get("/daftar", include_in_schema=False)(_index)
     app.get("/app", include_in_schema=False)(_index)
     app.get("/app/{path:path}", include_in_schema=False)(lambda path: _index())

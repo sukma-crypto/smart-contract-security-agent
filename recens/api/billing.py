@@ -1,6 +1,11 @@
 """Kredit & langganan.
 
 Yang membedakan paket adalah kuota dan durasi, bukan fitur.
+
+Seluruh rute di sini bekerja pada akun yang sedang masuk, dan **tidak menerima
+nomor akun dari luar**. Selama ``/accounts/{id}/topup`` masih ada, siapa pun
+yang bisa menebak sebuah angka bisa menambah kredit ke akun orang lain — atau,
+lewat ``/ledger``, membaca riwayat pemakaian mereka.
 """
 
 from __future__ import annotations
@@ -11,15 +16,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from ..core import credits
-from .deps import get_conn
+from .deps import current_account, get_conn
 
 router = APIRouter(tags=["langganan"])
-
-
-class AccountCreate(BaseModel):
-    email: str
-    display_name: str = ""
-    plan: str = "coba"
 
 
 class PlanChange(BaseModel):
@@ -33,6 +32,7 @@ class TopUp(BaseModel):
 
 @router.get("/plans")
 def list_plans() -> dict:
+    """Katalog paket. Terbuka, karena halaman harga perlu dibaca sebelum masuk."""
     return {
         "plans": [plan.to_dict() for plan in credits.PLANS.values()],
         "principle": (
@@ -46,50 +46,46 @@ def list_plans() -> dict:
     }
 
 
-@router.post("/accounts", status_code=201)
-def create_account(payload: AccountCreate, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
-    try:
-        return credits.create_account(
-            conn, email=payload.email, plan_key=payload.plan, display_name=payload.display_name
-        )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    except sqlite3.IntegrityError as exc:
-        raise HTTPException(409, f"Akun dengan surel {payload.email} sudah ada.") from exc
-
-
-@router.get("/accounts/{account_id}")
-def get_account(account_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
-    account = credits.get_account(conn, account_id)
-    if account is None:
-        raise HTTPException(404, f"Akun {account_id} tidak ditemukan.")
+@router.get("/account")
+def my_account(account: dict = Depends(current_account)) -> dict:
+    """Akun sendiri, beserta paket, sisa kredit, dan jumlah proyek."""
     return account
 
 
-@router.post("/accounts/{account_id}/plan")
+@router.post("/account/plan")
 def change_plan(
-    account_id: int, payload: PlanChange, conn: sqlite3.Connection = Depends(get_conn)
+    payload: PlanChange,
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
 ) -> dict:
     try:
-        return credits.change_plan(conn, account_id, payload.plan)
+        return credits.change_plan(conn, account["id"], payload.plan)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
-@router.post("/accounts/{account_id}/topup")
+@router.post("/account/topup")
 def top_up(
-    account_id: int, payload: TopUp, conn: sqlite3.Connection = Depends(get_conn)
+    payload: TopUp,
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
 ) -> dict:
+    """Penambahan kredit.
+
+    Belum ada gerbang pembayaran: yang tercatat di sini adalah pembukuan
+    internal, dan pemanggilnya harus sudah masuk sebagai pemilik akun.
+    """
     if payload.amount <= 0:
         raise HTTPException(400, "Jumlah kredit harus lebih besar dari nol.")
     try:
-        return credits.top_up(conn, account_id, payload.amount, payload.reason)
+        return credits.top_up(conn, account["id"], payload.amount, payload.reason)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
 
 
-@router.get("/accounts/{account_id}/ledger")
-def ledger(account_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
-    if credits.get_account(conn, account_id) is None:
-        raise HTTPException(404, f"Akun {account_id} tidak ditemukan.")
-    return credits.ledger(conn, account_id)
+@router.get("/account/ledger")
+def ledger(
+    conn: sqlite3.Connection = Depends(get_conn), account: dict = Depends(current_account)
+) -> list[dict]:
+    """Riwayat pemakaian kredit — tiap tindakan yang menagih dan berapa besarnya."""
+    return credits.ledger(conn, account["id"])

@@ -20,13 +20,28 @@ SCHEMA = """
 PRAGMA journal_mode = WAL;
 
 CREATE TABLE IF NOT EXISTS accounts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    email         TEXT UNIQUE,
+    display_name  TEXT,
+    password_hash TEXT,
+    plan          TEXT NOT NULL DEFAULT 'coba',
+    credits       INTEGER NOT NULL DEFAULT 0,
+    valid_until   TEXT,
+    created_at    TEXT NOT NULL
+);
+
+-- Sesi masuk. Yang tersimpan hanyalah SHA-256 dari token; token aslinya hanya
+-- pernah ada di kuki peramban, sehingga salinan basis data yang bocor tidak
+-- bisa langsung dipakai masuk.
+CREATE TABLE IF NOT EXISTS sessions (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    email        TEXT UNIQUE,
-    display_name TEXT,
-    plan         TEXT NOT NULL DEFAULT 'coba',
-    credits      INTEGER NOT NULL DEFAULT 0,
-    valid_until  TEXT,
-    created_at   TEXT NOT NULL
+    account_id   INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    token_hash   TEXT NOT NULL UNIQUE,
+    user_agent   TEXT NOT NULL DEFAULT '',
+    ip           TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    expires_at   TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -197,6 +212,8 @@ CREATE TABLE IF NOT EXISTS credit_ledger (
     created_at TEXT NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id);
+CREATE INDEX IF NOT EXISTS idx_projects_account ON projects(account_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_sections_project ON sections(project_id, parent_id, position);
 CREATE INDEX IF NOT EXISTS idx_blocks_section ON blocks(section_id, position);
 CREATE INDEX IF NOT EXISTS idx_refs_project ON refs(project_id);
@@ -228,9 +245,30 @@ def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
     return conn
 
 
+#: Kolom yang ditambahkan setelah basis data pertama kali dipakai orang.
+#: ``CREATE TABLE IF NOT EXISTS`` tidak menyentuh tabel yang sudah ada, jadi
+#: kolom baru harus ditambal sendiri. Ini bukan pengganti sistem migrasi —
+#: hanya cukup untuk penambahan kolom yang boleh kosong. Begitu ada perubahan
+#: yang menuntut penulisan ulang data, pasang Alembic.
+_ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "accounts": {"password_hash": "TEXT"},
+}
+
+
+def _patch_columns(conn: sqlite3.Connection) -> None:
+    for table, columns in _ADDED_COLUMNS.items():
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if not existing:
+            continue
+        for name, decl in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
 def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     conn = connect(db_path)
     conn.executescript(SCHEMA)
+    _patch_columns(conn)
     conn.commit()
     return conn
 

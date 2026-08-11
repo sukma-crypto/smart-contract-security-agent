@@ -225,31 +225,28 @@ class TestPaketAkses:
         assert {"analisis_data", "cek_naskah", "auto_format", "ekspor"} <= free
 
     def test_kuota_proyek_paket_coba(self, client):
-        account = client.post(
-            "/api/accounts", json={"email": "uji@contoh.ac.id", "plan": "coba"}
-        ).json()
-        first = client.post(
-            "/api/projects",
-            json={"name": "Satu", "work_type": "makalah", "account_id": account["id"]},
-        )
+        """Paket coba dibatasi satu proyek — batas kuota, bukan kunci fitur."""
+        first = client.post("/api/projects", json={"name": "Satu", "work_type": "makalah"})
         assert first.status_code == 201
-        second = client.post(
-            "/api/projects",
-            json={"name": "Dua", "work_type": "makalah", "account_id": account["id"]},
-        )
+        second = client.post("/api/projects", json={"name": "Dua", "work_type": "makalah"})
         assert second.status_code == 402
 
     def test_naik_paket_membuka_proyek_tak_terbatas(self, client):
-        account = client.post(
-            "/api/accounts", json={"email": "dua@contoh.ac.id", "plan": "coba"}
-        ).json()
-        client.post(f"/api/accounts/{account['id']}/plan", json={"plan": "semester"})
+        client.post("/api/account/plan", json={"plan": "semester"})
         for name in ("Satu", "Dua", "Tiga"):
             response = client.post(
-                "/api/projects",
-                json={"name": name, "work_type": "makalah", "account_id": account["id"]},
+                "/api/projects", json={"name": name, "work_type": "makalah"}
             )
             assert response.status_code == 201
+
+    def test_proyek_tidak_bisa_dititipkan_ke_akun_lain(self, client, second_client):
+        """Pemilik diambil dari sesi, sehingga ``account_id`` kiriman diabaikan."""
+        created = client.post(
+            "/api/projects",
+            json={"name": "Titipan", "work_type": "makalah", "account_id": 999},
+        ).json()
+        assert client.get(f"/api/projects/{created['id']}").status_code == 200
+        assert second_client.get(f"/api/projects/{created['id']}").status_code == 404
 
 
 class TestKesehatanSistem:

@@ -33,12 +33,45 @@ def conn():
 
 
 @pytest.fixture
-def client():
+def anon_client():
+    """Klien tanpa sesi — untuk menguji bahwa endpoint memang tertutup."""
     from fastapi.testclient import TestClient
 
     from recens.main import app
 
     with TestClient(app) as test_client:
+        yield test_client
+
+
+def register(test_client, email: str, password: str = "kalimat sandi yang panjang") -> dict:
+    response = test_client.post(
+        "/api/auth/register", json={"email": email, "password": password}
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+@pytest.fixture
+def client(anon_client):
+    """Klien yang sudah masuk.
+
+    Seluruh endpoint proyek kini menuntut sesi, jadi fixture ini mendaftarkan
+    satu akun dan menyimpan kukinya. Pengujian yang ingin memeriksa keadaan
+    tanpa sesi memakai ``anon_client``.
+    """
+    register(anon_client, "penulis@kampus.ac.id")
+    return anon_client
+
+
+@pytest.fixture
+def second_client():
+    """Akun kedua dengan kuki terpisah, untuk menguji isolasi antar-akun."""
+    from fastapi.testclient import TestClient
+
+    from recens.main import app
+
+    with TestClient(app) as test_client:
+        register(test_client, "orang.lain@kampus.ac.id")
         yield test_client
 
 

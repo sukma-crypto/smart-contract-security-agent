@@ -21,7 +21,15 @@ from ..core.guidelines import (
 )
 from ..core.llm import services
 from ..core.manuscript import load_manuscript
-from .deps import charge_for, get_conn, get_project, upload_path
+from .deps import (
+    charge_for,
+    current_account,
+    get_conn,
+    get_project,
+    owned_ref,
+    owned_ruleset,
+    upload_path,
+)
 
 router = APIRouter(tags=["pustaka"])
 
@@ -59,14 +67,14 @@ class SynthesisRequest(BaseModel):
 
 @router.post("/projects/{project_id}/guidelines/upload", status_code=201)
 async def upload_guidelines(
-    project_id: int,
     file: UploadFile = File(...),
     name: str = Form("Pedoman penulisan"),
     kind: str = Form("fakultas"),
     conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Baca PDF pedoman menjadi aturan yang mengikat seluruh keluaran."""
-    get_project(project_id, conn)
+    project_id = project["id"]
     destination = upload_path(project_id, file.filename or "pedoman.pdf", "pedoman")
     destination.write_bytes(await file.read())
 
@@ -91,29 +99,35 @@ async def upload_guidelines(
 
 @router.post("/projects/{project_id}/guidelines/text", status_code=201)
 def add_guidelines_text(
-    project_id: int, payload: GuidelineText, conn: sqlite3.Connection = Depends(get_conn)
+    payload: GuidelineText,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Untuk instruksi dosen atau ketentuan panitia yang datang sebagai teks."""
-    get_project(project_id, conn)
     rules = parse_guidelines(payload.text, name=payload.name, kind=payload.kind)
-    ruleset_id = save_ruleset(conn, project_id, rules)
+    ruleset_id = save_ruleset(conn, project["id"], rules)
     return {"id": ruleset_id, "rules": rules.to_dict(), "assumed": rules.assumed}
 
 
 @router.get("/projects/{project_id}/guidelines")
-def get_guidelines(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
-    get_project(project_id, conn)
+def get_guidelines(
+    conn: sqlite3.Connection = Depends(get_conn), project: dict = Depends(get_project)
+) -> dict:
     return {
-        "active": active_ruleset(conn, project_id).to_dict(),
-        "history": list_rulesets(conn, project_id),
+        "active": active_ruleset(conn, project["id"]).to_dict(),
+        "history": list_rulesets(conn, project["id"]),
     }
 
 
 @router.patch("/guidelines/{ruleset_id}")
 def patch_guidelines(
-    ruleset_id: int, patch: dict, conn: sqlite3.Connection = Depends(get_conn)
+    ruleset_id: int,
+    patch: dict,
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
 ) -> dict:
     """Perbaiki aturan hasil pembacaan otomatis."""
+    owned_ruleset(conn, account["id"], ruleset_id)
     try:
         rules = update_ruleset(conn, ruleset_id, patch)
     except ValueError as exc:
@@ -131,24 +145,31 @@ def search_references(
     providers: str | None = None,
     project_id: int | None = None,
     conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
 ) -> dict:
-    """Penelusuran serentak ke sumber nasional dan internasional."""
+    """Penelusuran serentak ke sumber nasional dan internasional.
+
+    Menuntut sesi meski tidak menyentuh proyek: endpoint inilah yang memanggil
+    Crossref, OpenAlex, dan Semantic Scholar atas nama Recens. Dibiarkan
+    terbuka, ia menjadi proksi gratis yang bisa membuat kuota kita diblokir.
+    """
     chosen = providers.split(",") if providers else None
     if project_id:
-        project = get_project(project_id, conn)
+        project = get_project(project_id, conn, account)
         charge_for(conn, project, "pencarian_literatur")
     return sources.search_all(q, rows=rows, providers=chosen)
 
 
 @router.post("/projects/{project_id}/references", status_code=201)
 def add_reference(
-    project_id: int, payload: ReferenceAdd, conn: sqlite3.Connection = Depends(get_conn)
+    payload: ReferenceAdd,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Masukkan hasil pencarian ke pustaka proyek."""
-    get_project(project_id, conn)
     reference = reflib.add_reference(
         conn,
-        project_id,
+        project["id"],
         entry=payload.entry,
         source_db=payload.source_db,
         external_id=payload.external_id,
@@ -160,17 +181,18 @@ def add_reference(
 
 @router.post("/projects/{project_id}/references/doi", status_code=201)
 def add_reference_by_doi(
-    project_id: int, payload: DoiAdd, conn: sqlite3.Connection = Depends(get_conn)
+    payload: DoiAdd,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Tambah referensi lewat DOI — metadata ditarik langsung dari Crossref."""
-    get_project(project_id, conn)
     try:
         result = sources.fetch_doi(payload.doi)
     except sources.SourceUnavailable as exc:
         raise HTTPException(404, str(exc)) from exc
     return reflib.add_reference(
         conn,
-        project_id,
+        project["id"],
         entry=result.entry,
         source_db=result.source_db,
         external_id=result.external_id,
@@ -180,17 +202,17 @@ def add_reference_by_doi(
 
 @router.post("/projects/{project_id}/references/upload", status_code=201)
 async def upload_reference_pdf(
-    project_id: int,
     file: UploadFile = File(...),
     title: str = Form(""),
     conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Unggah PDF sendiri; isinya diindeks agar bisa ditanyai.
 
     Metadata hasil pembacaan PDF ditandai belum terverifikasi sampai berhasil
     ditelusuri ke basis data resmi lewat endpoint verifikasi.
     """
-    get_project(project_id, conn)
+    project_id = project["id"]
     destination = upload_path(project_id, file.filename or "referensi.pdf", "referensi")
     destination.write_bytes(await file.read())
 
@@ -252,8 +274,13 @@ def _first_abstract(text: str) -> str:
 
 
 @router.post("/references/{ref_id}/verify")
-def verify_reference(ref_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+def verify_reference(
+    ref_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
+) -> dict:
     """Telusuri referensi unggahan ke basis data ilmiah resmi."""
+    owned_ref(conn, account["id"], ref_id)
     try:
         reference = reflib.verify_reference(conn, ref_id)
     except (ValueError, sources.SourceUnavailable) as exc:
@@ -270,9 +297,10 @@ def verify_reference(ref_id: int, conn: sqlite3.Connection = Depends(get_conn)) 
 
 
 @router.get("/projects/{project_id}/references")
-def get_references(project_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
-    get_project(project_id, conn)
-    references = reflib.list_references(conn, project_id)
+def get_references(
+    conn: sqlite3.Connection = Depends(get_conn), project: dict = Depends(get_project)
+) -> dict:
+    references = reflib.list_references(conn, project["id"])
     return {
         "count": len(references),
         "verified": sum(1 for r in references if r["verified"]),
@@ -281,7 +309,12 @@ def get_references(project_id: int, conn: sqlite3.Connection = Depends(get_conn)
 
 
 @router.delete("/references/{ref_id}", status_code=204)
-def delete_reference(ref_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> None:
+def delete_reference(
+    ref_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
+) -> None:
+    owned_ref(conn, account["id"], ref_id)
     reflib.delete_reference(conn, ref_id)
 
 
@@ -290,10 +323,12 @@ def delete_reference(ref_id: int, conn: sqlite3.Connection = Depends(get_conn)) 
 
 @router.post("/projects/{project_id}/ask")
 def ask_journal(
-    project_id: int, payload: AskRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: AskRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Bertanya atas isi jurnal di pustaka; jawaban disertai penunjuk halaman."""
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     hits = retrieval.search_chunks(
         conn, project_id, payload.question, top_k=payload.top_k, ref_ids=payload.ref_ids
     )
@@ -305,10 +340,12 @@ def ask_journal(
 
 @router.post("/projects/{project_id}/synthesis")
 def synthesis_matrix(
-    project_id: int, payload: SynthesisRequest, conn: sqlite3.Connection = Depends(get_conn)
+    payload: SynthesisRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Matriks sintesis: penulis, tahun, teori, metode, temuan, dan celah penelitian."""
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     references = reflib.list_references(conn, project_id)
     if payload.ref_ids:
         references = [r for r in references if r["id"] in payload.ref_ids]
@@ -335,13 +372,13 @@ def synthesis_matrix(
 
 @router.get("/projects/{project_id}/bibliography")
 def bibliography(
-    project_id: int,
     style: str | None = None,
     only_cited: bool = True,
     conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
 ) -> dict:
     """Daftar pustaka yang selalu sinkron dengan sitasi dalam teks."""
-    project = get_project(project_id, conn)
+    project_id = project["id"]
     rules = active_ruleset(conn, project_id)
     manuscript = load_manuscript(conn, project_id)
     style_key = style or project["citation_style"] or rules.citation_style
