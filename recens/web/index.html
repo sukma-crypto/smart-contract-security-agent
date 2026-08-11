@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recens — AI writing tool untuk karya tulis ilmiah</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232f5d50'/><text x='16' y='23' font-size='20' font-family='Georgia,serif' fill='white' text-anchor='middle'>R</text></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <h1>Recens</h1>
+      <span>AI writing tool untuk seluruh karya tulis ilmiah</span>
+    </div>
+    <div class="spacer"></div>
+    <select id="project-picker" style="width:280px"></select>
+    <span id="llm-status" class="status-pill">memeriksa…</span>
+  </header>
+
+  <div class="main">
+    <nav class="steps">
+      <div class="label">Alur kerja</div>
+      <div id="step-nav"></div>
+      <div class="label" style="margin-top:10px">Ringkasan</div>
+      <button class="step" data-view="dashboard">
+        <span class="num">◍</span><span><span class="t">Dashboard progres</span></span>
+      </button>
+      <button class="step" data-view="limits">
+        <span class="num">§</span><span><span class="t">Batas produk</span></span>
+      </button>
+    </nav>
+
+    <main class="content"><div id="view"></div></main>
+  </div>
+</div>
+<div id="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

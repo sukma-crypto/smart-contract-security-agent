@@ -1,0 +1,629 @@
+"""Fitur penulisan yang memakai model bahasa, lengkap dengan jalur cadangannya.
+
+Tiap layanan di sini punya dua jalur: jalur model (kalimatnya lebih luwes) dan
+jalur deterministik yang berjalan tanpa kunci API. Jalur kedua bukan sekadar
+pesan kesalahan — ia mengerjakan bagian pekerjaan yang memang tidak menuntut
+model, misalnya menyunting bentuk tidak baku, menyusun kerangka dari struktur
+yang berlaku, atau menjawab pertanyaan dengan mengembalikan kutipan sumber
+beserta halamannya.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+
+from ..checks.language import KATA_TIDAK_BAKU, RAGAM_PERCAKAPAN, check_text
+from ..manuscript import Manuscript
+from ..retrieval import Hit, format_evidence
+from ..stats.engine import AnalysisResult
+from ..stats.narrative import draft_narrative
+from . import prompts
+from .base import LLMUnavailable
+from .guardrails import GuardrailError, Verdict, guard_output, guard_request, word_budget
+from .providers import get_provider
+
+
+@dataclass
+class ServiceResult:
+    text: str
+    source: str = "model"  # model | deterministik
+    verdict: Verdict | None = None
+    meta: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {
+            "text": self.text,
+            "source": self.source,
+            "verdict": self.verdict.to_dict() if self.verdict else None,
+            "meta": self.meta,
+        }
+
+
+def _call(system: str, user: str, max_tokens: int = 900, fast: bool = False, temperature=0.3):
+    provider = get_provider()
+    return provider.complete(
+        system=system, user=user, max_tokens=max_tokens, temperature=temperature, fast=fast
+    )
+
+
+# --- Penulisan & bahasa ------------------------------------------------------
+
+
+def continue_sentence(
+    context: str,
+    section_title: str = "",
+    work_type_label: str = "",
+    citekeys: set[str] | None = None,
+) -> ServiceResult:
+    """Lanjutan kalimat: menghapus kebuntuan halaman kosong."""
+    verdict = guard_request(context, kind="lanjutan_kalimat")
+    if not verdict.allowed:
+        raise GuardrailError(verdict)
+
+    budget = word_budget("lanjutan_kalimat")
+    system = prompts.render(prompts.CONTINUATION, max_words=budget)
+    user = (
+        f"Jenis karya: {work_type_label or 'karya tulis ilmiah'}\n"
+        f"Bagian yang sedang ditulis: {section_title or 'tidak disebutkan'}\n"
+        f"Citekey yang tersedia di pustaka: {', '.join(sorted(citekeys or [])) or 'belum ada'}\n\n"
+        f"Teks sejauh ini:\n{context}\n\nLanjutkan:"
+    )
+    try:
+        completion = _call(system, user, max_tokens=300, fast=True, temperature=0.4)
+    except LLMUnavailable as exc:
+        return ServiceResult(
+            text="",
+            source="deterministik",
+            meta={
+                "unavailable": str(exc),
+                "hint": (
+                    "Lanjutan kalimat memerlukan model bahasa. Fitur lain — outline, "
+                    "sitasi, analisis data, pemeriksaan naskah, dan ekspor — tetap berjalan."
+                ),
+            },
+        )
+
+    text, output_verdict = guard_output(
+        completion.text, kind="lanjutan_kalimat", allowed_citekeys=citekeys
+    )
+    return ServiceResult(
+        text=text,
+        verdict=output_verdict,
+        meta={"model": completion.model, "tokens": completion.total_tokens},
+    )
+
+
+def paraphrase(text: str, instruction: str = "") -> ServiceResult:
+    """Parafrase yang selalu disertai penjelasan alasan perubahan."""
+    verdict = guard_request(f"{instruction} {text}", kind="parafrase")
+    if not verdict.allowed:
+        raise GuardrailError(verdict)
+
+    system = prompts.render(prompts.PARAPHRASE)
+    user = f"Teks yang diparafrase:\n{text}"
+    if instruction:
+        user += f"\n\nPermintaan tambahan pengguna: {instruction}"
+
+    try:
+        completion = _call(system, user, max_tokens=700, fast=True, temperature=0.5)
+    except LLMUnavailable:
+        return ServiceResult(
+            text=_normalize_academic(text),
+            source="deterministik",
+            meta={
+                "explanation": (
+                    "Tanpa model bahasa, Recens hanya membakukan ejaan dan bentuk kata. "
+                    "Parafrase yang mengubah struktur kalimat memerlukan kunci API."
+                )
+            },
+        )
+
+    body, _, reason = completion.text.partition("ALASAN:")
+    cleaned, output_verdict = guard_output(body.strip(), kind="parafrase")
+    return ServiceResult(
+        text=cleaned,
+        verdict=output_verdict,
+        meta={
+            "explanation": reason.strip()
+            or "Struktur kalimat diubah dengan mempertahankan makna dan seluruh angka.",
+            "reminder": (
+                "Parafrase tidak menghapus kewajiban menyitasi. Bila gagasannya milik "
+                "orang lain, sitasi tetap harus dicantumkan."
+            ),
+            "model": completion.model,
+        },
+    )
+
+
+def academic_language(text: str) -> ServiceResult:
+    """Penyuntingan sesuai kaidah PUEBI/EYD."""
+    findings = [f.to_dict() for f in check_text(text)]
+    system = prompts.render(prompts.ACADEMIC_LANGUAGE)
+    user = f"Teks:\n{text}"
+
+    try:
+        completion = _call(system, user, max_tokens=1200, fast=True, temperature=0.2)
+    except LLMUnavailable:
+        return ServiceResult(
+            text=_normalize_academic(text),
+            source="deterministik",
+            meta={
+                "findings": findings,
+                "note": (
+                    f"{len(findings)} temuan kaidah bahasa diperbaiki secara otomatis "
+                    f"berdasarkan daftar bentuk baku dan aturan penulisan."
+                ),
+            },
+        )
+
+    cleaned, verdict = guard_output(completion.text, kind="bahasa_akademik")
+    return ServiceResult(
+        text=cleaned, verdict=verdict, meta={"findings": findings, "model": completion.model}
+    )
+
+
+def _normalize_academic(text: str) -> str:
+    """Pembakuan deterministik: bentuk tidak baku, ragam percakapan, dan spasi."""
+    result = text
+    for wrong, right in {**KATA_TIDAK_BAKU, **RAGAM_PERCAKAPAN}.items():
+        result = re.sub(
+            rf"\b{re.escape(wrong)}\b",
+            lambda m, r=right: r.capitalize() if m.group(0)[0].isupper() else r,
+            result,
+            flags=re.IGNORECASE,
+        )
+    result = re.sub(r"\s{2,}", " ", result)
+    result = re.sub(r"\s+([,.;:!?])", r"\1", result)
+    result = re.sub(r"([,.;:!?])(?=[A-Za-z])", r"\1 ", result)
+    return result.strip()
+
+
+#: Template siap pakai untuk bagian standar (Bagian 4.1).
+SECTION_TEMPLATES: dict[str, dict] = {
+    "latar_belakang": {
+        "label": "Latar Belakang",
+        "outline": [
+            "Kondisi ideal atau harapan tentang topik ini menurut teori dan kebijakan.",
+            "Kenyataan di lapangan yang berbeda dari kondisi ideal, disertai data pendukung.",
+            "Kesenjangan antara harapan dan kenyataan, serta dampaknya bila dibiarkan.",
+            "Penelitian terdahulu yang sudah membahas dan apa yang belum terjawab.",
+            "Alasan penelitian ini perlu dilakukan dan apa yang ditawarkannya.",
+        ],
+    },
+    "rumusan_masalah": {
+        "label": "Rumusan Masalah",
+        "outline": [
+            "Bagaimana gambaran [variabel X] pada [objek penelitian]?",
+            "Apakah terdapat pengaruh [variabel X] terhadap [variabel Y] pada [objek]?",
+            "Seberapa besar kontribusi [variabel X] terhadap [variabel Y]?",
+        ],
+    },
+    "tujuan": {
+        "label": "Tujuan Penelitian",
+        "outline": [
+            "Untuk mengetahui gambaran [variabel X] pada [objek penelitian].",
+            "Untuk menganalisis pengaruh [variabel X] terhadap [variabel Y].",
+            "Untuk mengukur besar kontribusi [variabel X] terhadap [variabel Y].",
+        ],
+    },
+    "landasan_teori": {
+        "label": "Kerangka Teori",
+        "outline": [
+            "Definisi [variabel] menurut beberapa ahli, ditutup sintesis penulis.",
+            "Dimensi atau indikator [variabel] beserta dasar teoretisnya.",
+            "Faktor yang memengaruhi [variabel].",
+            "Teori utama (grand theory) yang menaungi hubungan antarvariabel.",
+        ],
+    },
+    "hipotesis": {
+        "label": "Hipotesis",
+        "outline": [
+            "H1: Terdapat pengaruh positif dan signifikan [variabel X] terhadap [variabel Y].",
+            "H2: Terdapat pengaruh positif dan signifikan [variabel Z] terhadap [variabel Y].",
+            "H3: [variabel X] dan [variabel Z] secara simultan berpengaruh terhadap "
+            "[variabel Y].",
+        ],
+    },
+    "abstrak": {
+        "label": "Abstrak",
+        "outline": [
+            "Tujuan penelitian dalam satu kalimat.",
+            "Metode: pendekatan, populasi dan sampel, teknik pengumpulan dan analisis data.",
+            "Hasil utama beserta angka pendukungnya.",
+            "Simpulan dan implikasinya dalam satu sampai dua kalimat.",
+        ],
+    },
+    "metode": {
+        "label": "Metode Penelitian",
+        "outline": [
+            "Jenis dan pendekatan penelitian beserta alasan pemilihannya.",
+            "Populasi, teknik pengambilan sampel, dan ukuran sampel beserta perhitungannya.",
+            "Teknik pengumpulan data dan instrumen yang dipakai.",
+            "Uji instrumen: validitas dan reliabilitas.",
+            "Teknik analisis data beserta uji asumsi yang mendahuluinya.",
+        ],
+    },
+}
+
+
+def section_template(role: str) -> dict:
+    """Template bagian standar agar pengguna baru langsung bisa bekerja."""
+    template = SECTION_TEMPLATES.get(role)
+    if template is None:
+        raise ValueError(
+            f"Template '{role}' belum tersedia. Pilihan: {', '.join(SECTION_TEMPLATES)}."
+        )
+    return {
+        "role": role,
+        "label": template["label"],
+        "outline": template["outline"],
+        "text": "\n".join(f"{i + 1}. {line}" for i, line in enumerate(template["outline"])),
+        "note": (
+            "Template ini kerangka isi, bukan teks jadi. Ganti bagian dalam kurung siku "
+            "dengan variabel dan objek penelitian Anda, lalu kembangkan tiap butir menjadi "
+            "paragraf."
+        ),
+    }
+
+
+# --- Referensi & riset -------------------------------------------------------
+
+
+def ask_journal(question: str, hits: list[Hit]) -> ServiceResult:
+    """Tanya Jurnal — jawaban selalu disertai penunjuk halaman sumber."""
+    if not hits:
+        return ServiceResult(
+            text="",
+            source="deterministik",
+            meta={
+                "note": (
+                    "Belum ada potongan sumber yang cocok. Unggah PDF jurnal ke pustaka "
+                    "proyek lebih dahulu agar isinya bisa ditanyai."
+                ),
+                "sources": [],
+            },
+        )
+
+    evidence = format_evidence(hits)
+    system = prompts.render(prompts.JOURNAL_QA)
+    user = f"Pertanyaan: {question}\n\nKutipan sumber:\n{evidence}"
+
+    sources = [hit.as_dict() for hit in hits]
+    try:
+        completion = _call(system, user, max_tokens=900)
+    except LLMUnavailable:
+        return ServiceResult(
+            text="",
+            source="deterministik",
+            meta={
+                "sources": sources,
+                "note": (
+                    "Tanpa model bahasa, Recens mengembalikan potongan sumber paling relevan "
+                    "beserta halamannya. Kutipan di bawah bisa langsung dibaca dan dikutip."
+                ),
+            },
+        )
+
+    text, verdict = guard_output(completion.text, kind="tanya_jurnal")
+    return ServiceResult(
+        text=text, verdict=verdict, meta={"sources": sources, "model": completion.model}
+    )
+
+
+def synthesis_row(reference: dict, hits: list[Hit]) -> dict:
+    """Satu baris matriks sintesis untuk satu artikel."""
+    entry = reference.get("csl_json", {})
+    from ..citations.styles import authors, family_name, title_of
+    from ..citations.styles import year as csl_year
+
+    author_list = authors(entry)
+    base = {
+        "citekey": reference.get("citekey"),
+        "penulis": family_name(author_list[0]) if author_list else "—",
+        "tahun": csl_year(entry),
+        "judul": title_of(entry),
+        "teori": "belum diisi",
+        "metode": "belum diisi",
+        "sampel": "belum diisi",
+        "temuan": "belum diisi",
+        "celah": "belum diisi",
+    }
+    if not hits:
+        base["catatan"] = (
+            "Unggah PDF artikel ini ke pustaka proyek agar kolom teori, metode, dan "
+            "temuan bisa diisi dari isinya."
+        )
+        return base
+
+    system = prompts.render(prompts.SYNTHESIS)
+    user = f"Artikel: {base['judul']}\n\nKutipan sumber:\n{format_evidence(hits)}"
+    try:
+        completion = _call(system, user, max_tokens=700)
+        payload = _extract_json(completion.text)
+        if isinstance(payload, dict):
+            base.update({k: v for k, v in payload.items() if k in base})
+    except (LLMUnavailable, ValueError):
+        abstract = reference.get("abstract") or ""
+        if abstract:
+            base["temuan"] = abstract[:300].strip() + ("…" if len(abstract) > 300 else "")
+            base["catatan"] = "Kolom diisi dari abstrak resmi; lengkapi setelah membaca penuh."
+    return base
+
+
+# --- Analisis ----------------------------------------------------------------
+
+
+def narrative_for_analysis(result: AnalysisResult, context: str = "") -> ServiceResult:
+    """Susun narasi pembahasan di atas angka yang sudah dihitung mesin statistik.
+
+    Bila narasi model memuat angka yang tidak ada di hasil perhitungan, narasi
+    itu ditolak dan diganti draf deterministik. Angka tidak pernah datang dari
+    model.
+    """
+    fallback = draft_narrative(result)
+    payload = json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
+    system = prompts.render(prompts.NARRATIVE)
+    user = (
+        f"Konteks penelitian: {context or 'tidak disebutkan'}\n\n"
+        f"Hasil perhitungan (satu-satunya sumber angka yang boleh dipakai):\n{payload}"
+    )
+
+    try:
+        completion = _call(system, user, max_tokens=1200)
+    except LLMUnavailable:
+        return ServiceResult(
+            text=fallback,
+            source="deterministik",
+            meta={"note": "Narasi disusun dari temuan mesin statistik."},
+        )
+
+    text, verdict = guard_output(
+        completion.text, kind="narasi_hasil", analysis_result=result
+    )
+    if not verdict.allowed:
+        return ServiceResult(
+            text=fallback,
+            source="deterministik",
+            verdict=verdict,
+            meta={
+                "rejected_draft": completion.text,
+                "note": (
+                    "Narasi model ditolak karena memuat angka di luar hasil perhitungan. "
+                    "Yang ditampilkan adalah draf yang seluruh angkanya berasal dari mesin "
+                    "statistik."
+                ),
+            },
+        )
+    return ServiceResult(text=text, verdict=verdict, meta={"model": completion.model})
+
+
+# --- Sidang & publikasi ------------------------------------------------------
+
+
+def defense_questions(manuscript: Manuscript, weak_points: list[dict]) -> ServiceResult:
+    """Mode siap sidang: menyusun kemungkinan pertanyaan penguji."""
+    deterministic = _rule_based_defense_questions(manuscript, weak_points)
+    system = prompts.render(prompts.DEFENSE)
+    excerpt = manuscript.text()[:12000]
+    user = (
+        f"Titik lemah yang sudah terdeteksi sistem:\n"
+        f"{json.dumps(weak_points, ensure_ascii=False, indent=2)}\n\n"
+        f"Naskah:\n{excerpt}"
+    )
+    try:
+        completion = _call(system, user, max_tokens=2000)
+        payload = _extract_json(completion.text)
+        questions = payload if isinstance(payload, list) else deterministic
+    except (LLMUnavailable, ValueError):
+        return ServiceResult(
+            text=json.dumps(deterministic, ensure_ascii=False),
+            source="deterministik",
+            meta={"questions": deterministic},
+        )
+    return ServiceResult(
+        text=json.dumps(questions, ensure_ascii=False), meta={"questions": questions}
+    )
+
+
+def _rule_based_defense_questions(manuscript: Manuscript, weak_points: list[dict]) -> list[dict]:
+    """Pertanyaan yang bisa diturunkan langsung dari temuan pemeriksaan.
+
+    Penguji hampir selalu menyerang titik yang sama: sampel, asumsi statistik,
+    keselarasan rumusan dengan simpulan, dan kebaruan. Semua itu sudah terdeteksi
+    pemeriksaan naskah, jadi pertanyaannya bisa disusun tanpa model.
+    """
+    questions: list[dict] = []
+    for point in weak_points:
+        message = point.get("message", "")
+        if "rumusan masalah" in message.lower():
+            questions.append(
+                {
+                    "pertanyaan": "Coba jelaskan, rumusan masalah mana yang dijawab oleh "
+                                  "simpulan nomor berapa?",
+                    "sasaran": "Keselarasan rumusan masalah dan simpulan",
+                    "kerangka_jawaban": message,
+                    "tingkat_risiko": "tinggi",
+                }
+            )
+        if "normal" in message.lower() or "asumsi" in message.lower():
+            questions.append(
+                {
+                    "pertanyaan": "Asumsi klasik mana yang tidak terpenuhi, dan mengapa "
+                                  "uji ini tetap Anda pakai?",
+                    "sasaran": "Uji asumsi klasik",
+                    "kerangka_jawaban": message,
+                    "tingkat_risiko": "tinggi",
+                }
+            )
+        if "sitasi" in message.lower() or "referensi" in message.lower():
+            questions.append(
+                {
+                    "pertanyaan": "Dari mana sumber pernyataan ini? Boleh saya lihat "
+                                  "referensi aslinya?",
+                    "sasaran": "Kelengkapan dan ketertelusuran sitasi",
+                    "kerangka_jawaban": message,
+                    "tingkat_risiko": "tinggi",
+                }
+            )
+
+    standard = [
+        ("Apa kebaruan penelitian Anda dibandingkan penelitian terdahulu?",
+         "Kebaruan penelitian", "sedang"),
+        ("Mengapa Anda memilih teknik sampling ini, dan seberapa representatif sampelnya?",
+         "Populasi dan sampel", "tinggi"),
+        ("Mengapa memilih uji statistik ini dan bukan yang lain?",
+         "Teknik analisis data", "tinggi"),
+        ("Apa keterbatasan penelitian ini yang Anda sadari sendiri?",
+         "Keterbatasan penelitian", "sedang"),
+        ("Apa implikasi praktis temuan Anda bagi objek penelitian?",
+         "Implikasi dan saran", "sedang"),
+    ]
+    for question, target, risk in standard:
+        questions.append(
+            {
+                "pertanyaan": question,
+                "sasaran": target,
+                "kerangka_jawaban": (
+                    "Siapkan jawaban berdasarkan isi naskah; tunjuk bagian dan halaman "
+                    "yang mendukungnya."
+                ),
+                "tingkat_risiko": risk,
+            }
+        )
+    return questions
+
+
+def cover_letter(meta: dict) -> ServiceResult:
+    """Surat pengantar ke editor — berkas wajib yang jarang diajarkan."""
+    deterministic = _cover_letter_template(meta)
+    system = prompts.render(prompts.COVER_LETTER)
+    user = json.dumps(meta, ensure_ascii=False, indent=2)
+    try:
+        completion = _call(system, user, max_tokens=1200)
+    except LLMUnavailable:
+        return ServiceResult(text=deterministic, source="deterministik")
+    text, verdict = guard_output(completion.text, kind="cover_letter")
+    return ServiceResult(text=text, verdict=verdict, meta={"model": completion.model})
+
+
+def _cover_letter_template(meta: dict) -> str:
+    return f"""Kepada Yth.
+Editor {meta.get('journal', '[Nama Jurnal]')}
+
+Dengan hormat,
+
+Bersama surat ini kami mengajukan naskah berjudul "{meta.get('title', '[Judul Naskah]')}"
+untuk dipertimbangkan pemuatannya di {meta.get('journal', '[Nama Jurnal]')}.
+
+Kebaruan naskah ini terletak pada {meta.get('novelty', '[jelaskan apa yang belum dikerjakan penelitian sebelumnya]')}.
+Penelitian ini {meta.get('summary', '[ringkas tujuan, metode, dan temuan utama dalam dua hingga tiga kalimat]')}.
+
+Naskah ini sesuai dengan ruang lingkup {meta.get('journal', '[Nama Jurnal]')} karena
+{meta.get('scope_fit', '[jelaskan kaitan topik dengan fokus dan ruang lingkup jurnal]')}.
+
+Kami menyatakan bahwa naskah ini merupakan karya asli, belum pernah dipublikasikan,
+dan tidak sedang dipertimbangkan di jurnal lain. Seluruh penulis telah menyetujui
+pengiriman naskah ini dan tidak terdapat konflik kepentingan.
+
+Atas perhatian dan pertimbangan Bapak/Ibu, kami mengucapkan terima kasih.
+
+Hormat kami,
+{meta.get('author', '[Nama Penulis Korespondensi]')}
+{meta.get('affiliation', '[Afiliasi]')}
+{meta.get('email', '[Surel]')}
+"""
+
+
+def reviewer_response(comments: list[dict], meta: dict | None = None) -> ServiceResult:
+    """Tanggapan poin per poin — tahap yang menentukan diterima tidaknya artikel."""
+    deterministic = _reviewer_response_template(comments)
+    system = prompts.render(prompts.REVIEWER_RESPONSE)
+    user = json.dumps(
+        {"komentar": comments, "konteks": meta or {}}, ensure_ascii=False, indent=2
+    )
+    try:
+        completion = _call(system, user, max_tokens=2000)
+    except LLMUnavailable:
+        return ServiceResult(text=deterministic, source="deterministik")
+    text, verdict = guard_output(completion.text, kind="respon_reviewer")
+    return ServiceResult(text=text, verdict=verdict, meta={"model": completion.model})
+
+
+def _reviewer_response_template(comments: list[dict]) -> str:
+    lines = [
+        "TANGGAPAN ATAS KOMENTAR REVIEWER",
+        "",
+        "Kami mengucapkan terima kasih kepada reviewer atas masukan yang membangun.",
+        "Berikut tanggapan kami poin per poin.",
+        "",
+    ]
+    for index, comment in enumerate(comments, start=1):
+        lines += [
+            f"Komentar {index}: {comment.get('text', '')}",
+            f"Tanggapan: {comment.get('response', '[tuliskan tanggapan penulis]')}",
+            f"Perubahan pada naskah: {comment.get('change', '[sebutkan bagian dan halaman yang berubah]')}",
+            "",
+        ]
+    return "\n".join(lines)
+
+
+def structured_abstract(
+    manuscript: Manuscript,
+    sections: list[str] | None = None,
+    max_words: int = 250,
+) -> ServiceResult:
+    """Abstrak terstruktur sesuai pola yang diminta jurnal."""
+    sections = sections or ["Tujuan", "Metode", "Hasil", "Simpulan"]
+    deterministic = _abstract_skeleton(manuscript, sections, max_words)
+
+    system = prompts.render(prompts.STRUCTURED_ABSTRACT)
+    role_text = {
+        role: "\n".join(s.text() for s in manuscript.sections_by_role(role))
+        for role in ("latar_belakang", "metode", "hasil", "pembahasan", "simpulan")
+    }
+    user = (
+        f"Bagian abstrak yang diminta: {', '.join(sections)}\n"
+        f"Batas kata: {max_words}\n\n"
+        f"Isi naskah per bagian:\n{json.dumps(role_text, ensure_ascii=False)[:14000]}"
+    )
+    try:
+        completion = _call(system, user, max_tokens=900)
+    except LLMUnavailable:
+        return ServiceResult(text=deterministic, source="deterministik")
+
+    text, verdict = guard_output(completion.text, kind="abstrak", max_words=max_words + 40)
+    return ServiceResult(text=text, verdict=verdict, meta={"model": completion.model})
+
+
+def _abstract_skeleton(manuscript: Manuscript, sections: list[str], max_words: int) -> str:
+    role_for = {
+        "tujuan": "tujuan", "latar belakang": "latar_belakang", "metode": "metode",
+        "hasil": "hasil", "simpulan": "simpulan", "pembahasan": "pembahasan",
+    }
+    lines = []
+    for label in sections:
+        role = role_for.get(label.lower())
+        found = manuscript.sections_by_role(role) if role else []
+        first = ""
+        if found:
+            text = found[0].text()
+            sentences = re.split(r"(?<=[.!?])\s+", text)
+            first = " ".join(sentences[1:3]).strip()
+        lines.append(f"{label}: {first or '[belum ada isi pada bagian ini]'}")
+    lines.append("")
+    lines.append(f"Batas kata abstrak: {max_words}.")
+    return "\n".join(lines)
+
+
+def _extract_json(text: str):
+    """Ambil JSON dari keluaran model yang mungkin dibungkus blok kode."""
+    cleaned = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(r"[\[{].*[\]}]", cleaned, re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+        raise ValueError("Keluaran model bukan JSON yang sah.")

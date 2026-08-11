@@ -1,0 +1,13 @@
+# Data runtime: basis data proyek, unggahan pengguna, dan hasil ekspor.
+recens_data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Kunci API
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
