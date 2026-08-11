@@ -1,6 +1,16 @@
 import * as React from "react";
 
-/** Judul halaman beserta kalimat penjelasnya. */
+import { phaseOf, tintOf } from "@/App";
+import { useApp } from "@/lib/store";
+import { cn } from "@/lib/utils";
+
+/**
+ * Judul halaman beserta kalimat penjelasnya.
+ *
+ * Di atas judul ada tanda fase berwarna — warna yang sama dengan langkah itu
+ * di sidebar. Orang yang kembali ke ruang kerja setelah dua minggu tidak perlu
+ * membaca apa pun untuk tahu ia sedang di bagian mana pekerjaannya.
+ */
 export function PageHeader({
   title,
   children,
@@ -10,14 +20,22 @@ export function PageHeader({
   children?: React.ReactNode;
   action?: React.ReactNode;
 }) {
+  const { view } = useApp();
+  const phase = phaseOf(view);
+  const tint = tintOf(view);
+
   return (
     <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0">
-        <h2 className="font-serif text-[27px] font-semibold leading-tight tracking-tight">
+        <p className={cn("mb-2 flex items-center gap-2 text-[11px] font-medium", tint.text)}>
+          <span aria-hidden className={cn("h-[3px] w-6 rounded-full", tint.bg)} />
+          {phase.name}
+        </p>
+        <h2 className="font-serif text-[28px] font-semibold leading-tight tracking-tight">
           {title}
         </h2>
         {children ? (
-          <p className="mt-1.5 max-w-[58ch] text-[12.5px] leading-relaxed text-muted-foreground">
+          <p className="mt-2 max-w-[58ch] text-[12.5px] leading-relaxed text-muted-foreground">
             {children}
           </p>
         ) : null}

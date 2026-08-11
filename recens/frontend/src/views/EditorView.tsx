@@ -106,25 +106,36 @@ export function EditorView() {
         </nav>
       </aside>
 
-      {/* Permukaan menulis */}
+      {/* Permukaan menulis: satu lembar kertas di atas meja.
+          Naskahnya sendiri tetap tenang — tidak ada warna di antara barisnya —
+          tetapi lembarnya kini benar-benar terangkat dan punya marginnya
+          sendiri, sehingga terbaca sebagai halaman yang sedang digarap, bukan
+          sebagai kolom teks yang menempel pada latar. */}
       <div className="min-w-0">
-        <header className="measure mb-6">
-          <p className="tabular text-[11px] text-faint">{active?.number}</p>
-          <h2 className="mt-0.5 font-serif text-[26px] font-semibold leading-tight">
-            {active?.title ?? "Tidak ada bagian"}
-          </h2>
-          <div className="mt-2.5 flex items-center gap-3">
-            <div className="h-px flex-1 bg-border">
-              <div className="h-px bg-primary/50" style={{ width: `${progress}%` }} />
+        <div className="sheet px-7 py-8 sm:px-10 sm:py-10">
+          <header className="measure mb-7">
+            <p className="tabular text-[11px] font-medium text-violet">{active?.number}</p>
+            <h2 className="mt-1 font-serif text-[27px] font-semibold leading-tight">
+              {active?.title ?? "Tidak ada bagian"}
+            </h2>
+            <div className="mt-3 flex items-center gap-3">
+              <div className="h-1 flex-1 overflow-hidden rounded-full bg-border/70">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all duration-700",
+                    progress >= 85 ? "bg-success" : progress >= 40 ? "bg-amber" : "bg-clay",
+                  )}
+                  style={{ width: `${Math.max(progress, progress > 0 ? 3 : 0)}%` }}
+                />
+              </div>
+              <span className="tabular shrink-0 text-[11px] text-muted-foreground">
+                {num(active?.word_count ?? 0)}
+                {active?.target_words ? ` / ${num(active.target_words)}` : ""} kata
+              </span>
             </div>
-            <span className="tabular shrink-0 text-[11px] text-faint">
-              {num(active?.word_count ?? 0)}
-              {active?.target_words ? ` / ${num(active.target_words)}` : ""} kata
-            </span>
-          </div>
-        </header>
+          </header>
 
-        <div className="measure">
+          <div className="measure">
           {!active?.blocks.length ? (
             <button
               onClick={() => addBlock("paragraph")}
@@ -140,6 +151,7 @@ export function EditorView() {
               <InsertBar onAdd={addBlock} />
             </>
           )}
+          </div>
         </div>
       </div>
 

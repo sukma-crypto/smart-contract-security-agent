@@ -4,13 +4,18 @@ import { cn } from "@/lib/utils";
 /* Panel: pembungkus netral tanpa gaya judul yang memaksa.
    Judul ditulis sebagai heading sungguhan dengan kontras ukuran dan bobot,
    bukan label kapital ber-tracking — kebiasaan yang membuat setiap panel
-   terlihat sama pentingnya padahal tidak. */
+   terlihat sama pentingnya padahal tidak.
+
+   Kartunya memakai `sheet`: bayangan lembut alih-alih garis tepi tegas,
+   sehingga panel terbaca sebagai kertas yang terangkat dari mejanya. Garis
+   tepi tunggal di atas latar seputih isinya membuat seluruh halaman rata dan
+   tidak punya titik pandang. */
 
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn("rounded-lg border border-border bg-card", className)}
+      className={cn("sheet", className)}
       {...props}
     />
   ),
@@ -69,7 +74,12 @@ export function Section({
       {title || action ? (
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3 border-b border-border pb-2">
           <div className="min-w-0">
-            {title ? <h3 className="text-[15px] font-semibold leading-snug">{title}</h3> : null}
+            {title ? (
+              <h3 className="flex items-baseline gap-2 text-[15px] font-semibold leading-snug">
+                <span aria-hidden className="h-3 w-[3px] shrink-0 translate-y-px rounded-full bg-lagoon/70" />
+                {title}
+              </h3>
+            ) : null}
             {description ? (
               <p className="mt-0.5 max-w-2xl text-[12.5px] leading-relaxed text-muted-foreground">
                 {description}

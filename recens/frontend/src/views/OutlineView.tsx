@@ -2,7 +2,7 @@ import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge, DataTable, Progress } from "@/components/ui/display";
+import { Badge, DataTable, Progress, StatusBadge } from "@/components/ui/display";
 import { Field, Input } from "@/components/ui/form";
 import { api } from "@/lib/api";
 import { useActions, useApp } from "@/lib/store";
@@ -99,9 +99,7 @@ export function OutlineView() {
               num(section.word_count),
               num(section.target_words),
               <Progress key="p" value={Math.min(section.progress * 100, 100)} />,
-              <Badge key="s" variant={section.status === "selesai" ? "success" : "default"}>
-                {section.status}
-              </Badge>,
+              <StatusBadge key="s" status={section.status} />,
             ])}
           />
         </CardContent>

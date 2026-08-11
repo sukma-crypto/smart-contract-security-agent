@@ -1,11 +1,12 @@
 import * as React from "react";
-import { Check, LogOut, Moon, Sun, UserRound } from "lucide-react";
+import { Check, Gauge, LogOut, Moon, ShieldCheck, Sun, UserRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/display";
 import { SimpleSelect } from "@/components/ui/form";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
+import { BookStack } from "@/landing/illustrations";
 import { useActions, useApp } from "@/lib/store";
 
 import { ProjectView } from "@/views/ProjectView";
@@ -19,6 +20,62 @@ import { ExportView } from "@/views/ExportView";
 import { DashboardView } from "@/views/DashboardView";
 import { LimitsView } from "@/views/LimitsView";
 import { AccountView } from "@/views/AccountView";
+
+/**
+ * Delapan langkah dikelompokkan menjadi empat fase, dan tiap fase punya
+ * warnanya sendiri.
+ *
+ * Warna di sini bukan hiasan: ia menjawab pertanyaan yang paling sering
+ * muncul di kepala orang yang menggarap skripsi berbulan-bulan — "saya
+ * sekarang sebenarnya sedang di tahap apa". Empat fase, bukan delapan warna,
+ * karena delapan warna berbeda berhenti menjadi informasi dan berubah menjadi
+ * pelangi.
+ */
+const PHASES = [
+  { steps: ["buat_proyek", "muat_aturan", "kumpulkan_referensi"], name: "Persiapan", tint: "lagoon" },
+  { steps: ["susun_outline", "menulis"], name: "Menyusun naskah", tint: "violet" },
+  { steps: ["olah_data", "periksa_naskah"], name: "Data & pemeriksaan", tint: "amber" },
+  { steps: ["ekspor_revisi"], name: "Penyelesaian", tint: "clay" },
+] as const;
+
+type Tint = (typeof PHASES)[number]["tint"];
+
+const TINT: Record<Tint, { text: string; bg: string; ring: string; solid: string; soft: string }> = {
+  lagoon: {
+    text: "text-lagoon", bg: "bg-lagoon", ring: "ring-lagoon/30",
+    solid: "bg-lagoon text-white", soft: "bg-lagoon/10",
+  },
+  violet: {
+    text: "text-violet", bg: "bg-violet", ring: "ring-violet/30",
+    solid: "bg-violet text-white", soft: "bg-violet/10",
+  },
+  amber: {
+    text: "text-amber", bg: "bg-amber", ring: "ring-amber/35",
+    solid: "bg-amber text-ink", soft: "bg-amber/12",
+  },
+  clay: {
+    text: "text-clay", bg: "bg-clay", ring: "ring-clay/30",
+    solid: "bg-clay text-white", soft: "bg-clay/10",
+  },
+};
+
+/** Halaman di luar delapan langkah — tidak berada di fase mana pun. */
+const SIDE_PAGES: Record<string, { name: string; tint: Tint }> = {
+  dashboard: { name: "Ringkasan", tint: "lagoon" },
+  limits: { name: "Ketentuan produk", tint: "clay" },
+  akun: { name: "Pengaturan", tint: "violet" },
+};
+
+export function phaseOf(stepKey: string): { name: string; tint: Tint } {
+  const phase = PHASES.find((p) => (p.steps as readonly string[]).includes(stepKey));
+  if (phase) return { name: phase.name, tint: phase.tint };
+  return SIDE_PAGES[stepKey] ?? { name: PHASES[0].name, tint: PHASES[0].tint };
+}
+
+/** Warna langkah yang sedang dibuka — dipakai tampilan lain agar seragam. */
+export function tintOf(stepKey: string) {
+  return TINT[phaseOf(stepKey).tint];
+}
 
 const STEP_VIEWS = [
   "buat_proyek",
@@ -113,9 +170,15 @@ export default function App({
   const needsProject = STEP_VIEWS.indexOf(view) > 0 || view === "dashboard";
   const llm = health?.language_model;
 
+  const phase = phaseOf(view);
+  const tint = TINT[phase.tint];
+  const progress = project?.target_words
+    ? Math.min(100, Math.round((project.word_count / project.target_words) * 100))
+    : 0;
+
   return (
-    <div className="flex h-full flex-col bg-background">
-      <header className="flex shrink-0 items-center gap-3 px-5 py-3">
+    <div className="desk grain flex h-full flex-col bg-background">
+      <header className="relative z-10 flex shrink-0 items-center gap-3 px-5 py-3">
         <button
           onClick={onExit}
           className="flex items-baseline gap-2.5 rounded transition-opacity hover:opacity-70"
@@ -127,6 +190,24 @@ export default function App({
             alat menulis karya ilmiah
           </span>
         </button>
+
+        {/* Jumlah kata selalu terlihat. Yang membuat orang bertahan menulis
+            berbulan-bulan adalah melihat angkanya bergerak. */}
+        {project ? (
+          <div className="ml-4 hidden items-center gap-2.5 lg:flex">
+            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-border">
+              <div
+                className={cn("h-full rounded-full transition-all duration-700", tint.bg)}
+                style={{ width: `${Math.max(progress, 2)}%` }}
+              />
+            </div>
+            <span className="tabular text-[11.5px] text-muted-foreground">
+              {project.word_count.toLocaleString("id-ID")} kata
+              {project.target_words ? ` · ${progress}%` : ""}
+            </span>
+          </div>
+        ) : null}
+
         <div className="flex-1" />
         <SimpleSelect
           className="h-8 w-[min(19rem,44vw)] border-transparent bg-transparent hover:border-input"
@@ -154,75 +235,114 @@ export default function App({
         <AccountMenu onOpenAccount={() => setView("akun")} onSignedOut={onSignedOut} />
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <nav className="scrollbar-slim flex shrink-0 gap-4 overflow-x-auto px-5 pb-3 md:w-[13.5rem] md:flex-col md:gap-0 md:overflow-y-auto md:px-5 md:pb-8">
-          {steps.map((step) => {
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col md:flex-row">
+        {/* Delapan langkah sebagai satu perjalanan bergaris tulang punggung.
+            Garisnya menyambungkan penanda satu ke penanda berikutnya, sehingga
+            sidebar terbaca sebagai rute, bukan sebagai daftar menu. */}
+        <nav className="scrollbar-slim relative flex shrink-0 gap-3 overflow-x-auto px-5 pb-3 md:w-[14.5rem] md:flex-col md:gap-0 md:overflow-y-auto md:px-4 md:pb-8">
+          {steps.map((step, index) => {
             const current = view === step.key;
             const complete = done[step.key];
+            const stepPhase = phaseOf(step.key);
+            const stepTint = TINT[stepPhase.tint];
+            const first = index === 0 || phaseOf(steps[index - 1].key).name !== stepPhase.name;
+
             return (
-              <button
-                key={step.key}
-                onClick={() => setView(step.key)}
-                className={cn(
-                  "group flex shrink-0 items-baseline gap-2.5 py-1.5 text-left transition-colors md:w-full",
-                  current ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-                  step.active === false && "opacity-45",
-                )}
-              >
-                <span
+              <React.Fragment key={step.key}>
+                {first ? (
+                  <p className="mt-4 hidden pl-[30px] text-[10px] font-medium uppercase tracking-[0.14em] text-faint first:mt-0 md:block">
+                    {stepPhase.name}
+                  </p>
+                ) : null}
+                <button
+                  onClick={() => setView(step.key)}
                   className={cn(
-                    "tabular grid size-4 shrink-0 place-items-center rounded-full text-[9.5px] font-semibold transition-colors",
+                    "group relative flex shrink-0 items-start gap-2.5 rounded-lg py-1.5 pl-2 pr-2.5 text-left transition-colors md:w-full",
                     current
-                      ? "bg-primary text-primary-foreground"
-                      : complete
-                        ? "bg-success/15 text-success"
-                        : "border border-border-strong text-faint",
+                      ? cn(stepTint.soft, "text-foreground")
+                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                    step.active === false && "opacity-45",
                   )}
                 >
-                  {complete && !current ? <Check className="size-2.5" strokeWidth={3} /> : step.number}
-                </span>
-                <span className="min-w-0">
+                  {/* Tulang punggung antar-penanda */}
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "absolute left-[15px] top-[26px] hidden h-[calc(100%-18px)] w-px md:block",
+                      complete ? stepTint.bg : "bg-border",
+                      index === steps.length - 1 && "hidden md:hidden",
+                    )}
+                  />
                   <span
                     className={cn(
-                      "block whitespace-nowrap text-[12.5px] leading-snug md:whitespace-normal",
-                      current && "font-semibold",
+                      "tabular relative z-10 grid size-[18px] shrink-0 translate-y-px place-items-center rounded-full text-[9.5px] font-semibold ring-2 ring-background transition-all",
+                      current
+                        ? stepTint.solid
+                        : complete
+                          ? cn(stepTint.solid, "opacity-85")
+                          : "border border-border-strong bg-card text-faint",
                     )}
                   >
-                    {step.title}
+                    {complete && !current ? (
+                      <Check className="size-2.5" strokeWidth={3} />
+                    ) : (
+                      step.number
+                    )}
                   </span>
-                  {step.note && current ? (
-                    <span className="hidden text-[10.5px] leading-snug text-faint md:block">
-                      {step.note}
+                  <span className="min-w-0 flex-1">
+                    <span
+                      className={cn(
+                        "block whitespace-nowrap text-[12.5px] leading-snug md:whitespace-normal",
+                        current && "font-semibold",
+                      )}
+                    >
+                      {step.title}
                     </span>
-                  ) : null}
-                </span>
-              </button>
+                    {step.note && current ? (
+                      <span className="hidden text-[10.5px] leading-snug text-faint md:block">
+                        {step.note}
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
+              </React.Fragment>
             );
           })}
 
-          <div className="hidden h-px bg-border md:my-3 md:block" />
+          <div className="mt-4 hidden h-px bg-border md:mx-2 md:mb-2 md:block" />
 
           {[
-            { key: "dashboard", title: "Progres" },
-            { key: "limits", title: "Batas produk" },
-            { key: "akun", title: "Akun" },
-          ].map(({ key, title }) => (
+            { key: "dashboard", title: "Progres", Icon: Gauge },
+            { key: "limits", title: "Batas produk", Icon: ShieldCheck },
+            { key: "akun", title: "Akun", Icon: UserRound },
+          ].map(({ key, title, Icon }) => (
             <button
               key={key}
               onClick={() => setView(key)}
               className={cn(
-                "flex shrink-0 items-baseline gap-2.5 py-1.5 text-left text-[12.5px] transition-colors md:w-full md:pl-[26px]",
+                "flex shrink-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[12.5px] transition-colors md:w-full",
                 view === key
-                  ? "font-semibold text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
+                  ? "bg-muted font-semibold text-foreground"
+                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
               )}
             >
+              <Icon className="size-3.5 shrink-0 opacity-70" />
               <span className="whitespace-nowrap">{title}</span>
             </button>
           ))}
         </nav>
 
-        <main className="scrollbar-slim min-w-0 flex-1 overflow-y-auto rounded-tl-xl border-l border-t border-border bg-paper px-6 pb-24 pt-7 md:px-10">
+        {/* Panel kerja sebagai lembar yang terangkat dari mejanya, dengan
+            satu garis warna fase di tepi atas — penanda diam yang mengingatkan
+            di tahap mana orang sedang bekerja tanpa perlu dibaca. */}
+        <main className="scrollbar-slim relative min-w-0 flex-1 overflow-y-auto rounded-tl-2xl border-l border-t border-border bg-paper px-6 pb-24 pt-8 shadow-[-8px_-8px_28px_-20px_rgba(30,25,20,0.25)] md:px-10">
+          <span
+            aria-hidden
+            className={cn(
+              "pointer-events-none absolute inset-x-0 top-0 h-[3px] rounded-tl-2xl opacity-80",
+              tint.bg,
+            )}
+          />
           {needsProject && !project ? (
             <EmptyState />
           ) : (
@@ -274,12 +394,14 @@ export default function App({
 function EmptyState() {
   const { setView } = useActions();
   return (
-    <div className="mx-auto max-w-sm pt-20 text-center">
-      <p className="font-serif text-[17px]">Belum ada proyek terbuka.</p>
-      <p className="mt-1.5 text-[12.5px] text-muted-foreground">
-        Pilih proyek di kanan atas, atau mulai dari langkah pertama.
+    <div className="mx-auto max-w-md pt-16 text-center">
+      <BookStack className="mx-auto w-28 opacity-90" />
+      <p className="mt-6 font-serif text-[19px]">Belum ada proyek terbuka.</p>
+      <p className="mx-auto mt-2 max-w-[36ch] text-[12.5px] leading-relaxed text-muted-foreground">
+        Pilih proyek di kanan atas, atau mulai dari langkah pertama — jenis karya
+        yang Anda pilih menentukan struktur bab dan batasnya.
       </p>
-      <Button className="mt-5" onClick={() => setView("buat_proyek")}>
+      <Button className="mt-6" onClick={() => setView("buat_proyek")}>
         Buat proyek
       </Button>
     </div>

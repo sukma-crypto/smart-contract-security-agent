@@ -110,27 +110,69 @@ export function StatLine({
   );
 }
 
+const METRIC_TONE = {
+  default: "border-border-strong",
+  lagoon: "border-lagoon",
+  amber: "border-amber",
+  violet: "border-violet",
+  clay: "border-clay",
+  success: "border-success",
+} as const;
+
 export function Metric({
   value,
   label,
   hint,
+  tone = "default",
 }: {
   value: React.ReactNode;
   label: string;
   hint?: React.ReactNode;
+  tone?: keyof typeof METRIC_TONE;
 }) {
   return (
-    <div className="border-l-2 border-border pl-3">
-      <div className="tabular text-[22px] font-semibold leading-none">{value}</div>
+    <div className={cn("border-l-2 pl-3", METRIC_TONE[tone])}>
+      <div className="tabular text-[24px] font-semibold leading-none">{value}</div>
       <div className="mt-1.5 text-[11.5px] leading-snug text-muted-foreground">{label}</div>
       {hint ? <div className="mt-1">{hint}</div> : null}
     </div>
   );
 }
 
-export function MetricRow({ children }: { children: React.ReactNode }) {
+/** Lencana status bab: warnanya menyatakan keadaan, bukan sekadar membingkai teks. */
+const STATUS_TONE: Record<string, string> = {
+  belum: "bg-muted text-muted-foreground",
+  draf: "bg-amber/15 text-warning",
+  selesai: "bg-success/15 text-success",
+};
+
+export function StatusBadge({ status }: { status: string }) {
   return (
-    <div className="grid grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-x-5 gap-y-4">
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-medium capitalize",
+        STATUS_TONE[status] ?? STATUS_TONE.belum,
+      )}
+    >
+      {status}
+    </span>
+  );
+}
+
+export function MetricRow({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "grid min-w-0 flex-1 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-x-6 gap-y-4",
+        className,
+      )}
+    >
       {children}
     </div>
   );
@@ -138,21 +180,34 @@ export function MetricRow({ children }: { children: React.ReactNode }) {
 
 /* --- Progress --- */
 
+/**
+ * Bilah kemajuan yang warnanya ikut berubah seiring isinya.
+ *
+ * Versi sebelumnya setinggi 1px berwarna abu-abu, dan pada tabel kerangka bab
+ * ia praktis tidak terlihat — padahal justru kolom itulah yang paling ingin
+ * dilihat orang yang sedang menggarap naskahnya. Warnanya berpindah dari clay
+ * (baru mulai) ke amber (separuh jalan) ke hijau (mendekati target), sehingga
+ * satu sapuan mata sudah cukup untuk tahu bab mana yang tertinggal.
+ */
 export const Progress = React.forwardRef<
   React.ComponentRef<typeof ProgressPrimitive.Root>,
   React.ComponentPropsWithoutRef<typeof ProgressPrimitive.Root> & { value?: number }
->(({ className, value = 0, ...props }, ref) => (
-  <ProgressPrimitive.Root
-    ref={ref}
-    className={cn("relative h-1 w-full overflow-hidden rounded-full bg-border", className)}
-    {...props}
-  >
-    <ProgressPrimitive.Indicator
-      className="h-full rounded-full bg-primary/70 transition-all"
-      style={{ width: `${Math.min(Math.max(value, 0), 100)}%` }}
-    />
-  </ProgressPrimitive.Root>
-));
+>(({ className, value = 0, ...props }, ref) => {
+  const pct = Math.min(Math.max(value, 0), 100);
+  const tone = pct >= 85 ? "bg-success" : pct >= 40 ? "bg-amber" : pct > 0 ? "bg-clay" : "bg-border";
+  return (
+    <ProgressPrimitive.Root
+      ref={ref}
+      className={cn("relative h-1.5 w-full overflow-hidden rounded-full bg-border/70", className)}
+      {...props}
+    >
+      <ProgressPrimitive.Indicator
+        className={cn("h-full rounded-full transition-all duration-700", tone)}
+        style={{ width: `${pct}%` }}
+      />
+    </ProgressPrimitive.Root>
+  );
+});
 Progress.displayName = "Progress";
 
 /* --- Tabs --- */
