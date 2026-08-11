@@ -123,17 +123,25 @@ const LIMITS = [
   ["Memparafrase disertai alasan perubahan", "Memparafrase untuk mengelabui deteksi"],
 ];
 
-export function Landing({ onEnter }: { onEnter: () => void }) {
+export interface LandingProps {
+  /** Ajakan utama: ke ruang kerja bila sudah masuk, ke pendaftaran bila belum. */
+  onEnter: () => void;
+  onSignIn: () => void;
+  signedIn: boolean;
+}
+
+export function Landing({ onEnter, onSignIn, signedIn }: LandingProps) {
+  const cta = signedIn ? "Buka ruang kerja" : "Mulai gratis";
   return (
     <div className="min-h-full bg-paper text-foreground">
-      <Nav onEnter={onEnter} />
-      <Hero onEnter={onEnter} />
+      <Nav onEnter={onEnter} onSignIn={onSignIn} signedIn={signedIn} cta={cta} />
+      <Hero onEnter={onEnter} cta={cta} />
       <Marquee />
       <Problems />
       <Workflow />
       <Engine />
       <Limits />
-      <Closing onEnter={onEnter} />
+      <Closing onEnter={onEnter} cta={cta} />
       <Footer />
     </div>
   );
@@ -141,7 +149,7 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
 
 /* --- Navigasi --- */
 
-function Nav({ onEnter }: { onEnter: () => void }) {
+function Nav({ onEnter, onSignIn, signedIn, cta }: LandingProps & { cta: string }) {
   return (
     <header className="sticky top-0 z-40 border-b border-border/70 bg-paper/85 backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-5">
@@ -153,8 +161,16 @@ function Nav({ onEnter }: { onEnter: () => void }) {
           <a href="#batas" className="transition-colors hover:text-foreground">Batas produk</a>
         </nav>
         <div className="flex-1" />
+        {!signedIn ? (
+          <button
+            onClick={onSignIn}
+            className="text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Masuk
+          </button>
+        ) : null}
         <Button size="sm" onClick={onEnter}>
-          Buka ruang kerja <ArrowRight />
+          {cta} <ArrowRight />
         </Button>
       </div>
     </header>
@@ -163,7 +179,7 @@ function Nav({ onEnter }: { onEnter: () => void }) {
 
 /* --- Hero --- */
 
-function Hero({ onEnter }: { onEnter: () => void }) {
+function Hero({ onEnter, cta }: { onEnter: () => void; cta: string }) {
   const { parts, finished } = useTypewriter(DEMO);
 
   return (
@@ -222,7 +238,7 @@ function Hero({ onEnter }: { onEnter: () => void }) {
               style={{ animationDelay: "240ms" }}
             >
               <Button size="lg" onClick={onEnter}>
-                Mulai menulis <ArrowRight />
+                {cta} <ArrowRight />
               </Button>
               <a
                 href="#alur"
@@ -615,7 +631,7 @@ function Limits() {
 
 /* --- Penutup --- */
 
-function Closing({ onEnter }: { onEnter: () => void }) {
+function Closing({ onEnter, cta }: { onEnter: () => void; cta: string }) {
   return (
     <section className="relative isolate overflow-hidden px-5 py-28">
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
@@ -637,7 +653,7 @@ function Closing({ onEnter }: { onEnter: () => void }) {
           sitasi, dan perakitan format semuanya lokal.
         </p>
         <Button size="lg" className="mt-7" onClick={onEnter}>
-          Buka ruang kerja <ArrowRight />
+          {cta} <ArrowRight />
         </Button>
       </Reveal>
     </section>

@@ -1,10 +1,11 @@
 import * as React from "react";
-import { Check, Moon, Sun } from "lucide-react";
+import { Check, LogOut, Moon, Sun, UserRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/display";
 import { SimpleSelect } from "@/components/ui/form";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth";
 import { useActions, useApp } from "@/lib/store";
 
 import { ProjectView } from "@/views/ProjectView";
@@ -17,6 +18,7 @@ import { ChecksView } from "@/views/ChecksView";
 import { ExportView } from "@/views/ExportView";
 import { DashboardView } from "@/views/DashboardView";
 import { LimitsView } from "@/views/LimitsView";
+import { AccountView } from "@/views/AccountView";
 
 const STEP_VIEWS = [
   "buat_proyek",
@@ -40,6 +42,7 @@ const VIEWS: Record<string, React.ComponentType> = {
   ekspor_revisi: ExportView,
   dashboard: DashboardView,
   limits: LimitsView,
+  akun: AccountView,
 };
 
 /** Langkah mana yang sudah punya isi — dipakai menandai kemajuan di sidebar. */
@@ -74,7 +77,13 @@ function useTheme() {
   return { dark, toggle: () => setDark((value) => !value) };
 }
 
-export default function App({ onExit }: { onExit?: () => void }) {
+export default function App({
+  onExit,
+  onSignedOut,
+}: {
+  onExit?: () => void;
+  onSignedOut?: () => void;
+}) {
   const { catalog, project, projects, view, loading, bootError, toasts, verdict, health } =
     useApp();
   const { setView, openProject, closeProject, dismissToast, dismissVerdict } = useActions();
@@ -142,6 +151,7 @@ export default function App({ onExit }: { onExit?: () => void }) {
         >
           {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
         </button>
+        <AccountMenu onOpenAccount={() => setView("akun")} onSignedOut={onSignedOut} />
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
@@ -195,6 +205,7 @@ export default function App({ onExit }: { onExit?: () => void }) {
           {[
             { key: "dashboard", title: "Progres" },
             { key: "limits", title: "Batas produk" },
+            { key: "akun", title: "Akun" },
           ].map(({ key, title }) => (
             <button
               key={key}
@@ -271,6 +282,91 @@ function EmptyState() {
       <Button className="mt-5" onClick={() => setView("buat_proyek")}>
         Buat proyek
       </Button>
+    </div>
+  );
+}
+
+/* --- Menu akun -----------------------------------------------------------
+   Ditaruh di header, bukan dikubur di sidebar: keluar dari akun harus selalu
+   satu klik jauhnya, terutama di komputer bersama. */
+
+function AccountMenu({
+  onOpenAccount,
+  onSignedOut,
+}: {
+  onOpenAccount: () => void;
+  onSignedOut?: () => void;
+}) {
+  const { account, logout } = useAuth();
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+
+  if (!account) return null;
+  const initial = (account.display_name || account.email || "?").trim().charAt(0).toUpperCase();
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((value) => !value)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Menu akun"
+        className="grid size-7 place-items-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground transition-opacity hover:opacity-85"
+      >
+        {initial}
+      </button>
+
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 top-9 z-50 w-60 rounded-lg border border-border bg-card p-1.5 shadow-xl"
+        >
+          <div className="border-b border-border px-2.5 pb-2.5 pt-1.5">
+            <p className="truncate text-[12.5px] font-medium">{account.display_name}</p>
+            <p className="truncate text-[11px] text-muted-foreground">{account.email}</p>
+            <p className="tabular mt-1.5 text-[11px] text-faint">
+              Paket {account.plan_detail.label} · {account.credits.toLocaleString("id-ID")} kredit
+            </p>
+          </div>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onOpenAccount();
+            }}
+            className="mt-1 flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-[12.5px] transition-colors hover:bg-muted"
+          >
+            <UserRound className="size-3.5 text-faint" /> Kelola akun
+          </button>
+          <button
+            role="menuitem"
+            onClick={async () => {
+              setOpen(false);
+              await logout();
+              onSignedOut?.();
+            }}
+            className="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-[12.5px] transition-colors hover:bg-muted"
+          >
+            <LogOut className="size-3.5 text-faint" /> Keluar
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

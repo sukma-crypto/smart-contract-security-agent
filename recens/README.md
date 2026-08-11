@@ -78,8 +78,12 @@ sedang aktif.
 Menjalankan pengujian:
 
 ```bash
-python -m pytest recens/tests -q      # 177 pengujian
+python -m pytest recens/tests -q      # 238 pengujian
 ```
+
+**Akun dibutuhkan.** Seluruh data pengguna terkunci ke pemiliknya, jadi buka
+`http://127.0.0.1:8000/daftar` untuk membuat akun pertama. Di balik HTTPS,
+setel `RECENS_HTTPS=1` agar kuki sesi ditandai `secure`.
 
 ### Menyunting antarmuka
 
@@ -253,6 +257,7 @@ recens/
 │   ├── glossary.py             glosarium dwibahasa per bidang ilmu
 │   ├── render.py               penanda → sitasi dan acuan silang
 │   ├── retrieval.py            BM25 lokal untuk Tanya Jurnal
+│   ├── auth.py                 kata sandi, sesi, dan hash yang bisa dinaikkan
 │   ├── credits.py              kuota dan durasi — bukan penguncian fitur
 │   ├── citations/              gaya, sumber resmi, pustaka proyek
 │   ├── stats/                  mesin statistik, metodologi, kualitatif, narasi
@@ -260,20 +265,45 @@ recens/
 │   ├── exporters/              DOCX, PDF, LaTeX
 │   └── llm/                    penyedia, prompt, layanan, dan penjaga batas
 ├── api/                        router per langkah alur kerja
+│   └── deps.py                 identitas dan kepemilikan — baca ini dulu
 ├── frontend/                   sumber antarmuka (React + Tailwind + shadcn/ui)
 │   ├── src/landing/            halaman depan beserta animasinya
+│   ├── src/auth/               halaman masuk dan daftar
 │   ├── src/views/              satu berkas per langkah alur kerja
 │   ├── src/components/ui/      primitif shadcn di atas Radix
-│   └── src/lib/                pemanggilan API, tipe, dan state aplikasi
+│   └── src/lib/                pemanggilan API, tipe, auth, dan state aplikasi
 ├── web/                        hasil build antarmuka (ikut di-commit)
-└── tests/                      177 pengujian
+└── tests/                      238 pengujian
 ```
 
-Aplikasi punya dua wajah yang sengaja dibedakan. `/` adalah halaman depan —
-berwarna, beranimasi, tempat menjelaskan produk. `/app` adalah ruang kerja yang
-sengaja tenang, karena dipakai berjam-jam untuk menulis; di sanalah naskah
-menjadi objek utamanya dan perkakas mundur ke belakang. Keduanya dilayani
-`index.html` yang sama dan dipilih di sisi klien.
+Aplikasi punya tiga wajah yang sengaja dibedakan. `/` adalah halaman depan —
+berwarna, beranimasi, tempat menjelaskan produk. `/masuk` dan `/daftar` memakai
+bahasa visual yang sama supaya perpindahannya tidak terasa seperti keluar dari
+produk. `/app` adalah ruang kerja yang sengaja tenang, karena dipakai
+berjam-jam untuk menulis; di sanalah naskah menjadi objek utamanya dan perkakas
+mundur ke belakang. Ketiganya dilayani `index.html` yang sama dan dipilih di
+sisi klien.
+
+### Akun dan kepemilikan
+
+Kata sandi disimpan sebagai turunan PBKDF2-HMAC-SHA256 dengan garam acak per
+akun; jumlah iterasinya ikut tersimpan di dalam string hash, sehingga angka itu
+bisa dinaikkan tanpa membatalkan kata sandi yang sudah ada. Token sesi dikirim
+ke peramban apa adanya, tetapi yang tersimpan di basis data hanyalah SHA-256
+darinya — salinan basis data yang bocor tidak langsung menyerahkan sesi siapa
+pun.
+
+Aturan kepemilikannya satu kalimat: **tidak ada sumber daya yang boleh dibaca
+atau diubah tanpa ditelusuri lebih dahulu ke proyek, dan proyek ke akun yang
+sedang masuk.** `get_project` karena itu dipakai sebagai *dependency* FastAPI,
+bukan dipanggil di dalam badan fungsi rute — pemeriksaannya berjalan sebelum
+kode rutenya, sehingga tidak bisa terlewat di satu titik. Sumber daya yang
+diakses lewat ID sendiri, seperti `PATCH /api/blocks/{id}`, ditelusuri balik ke
+pemiliknya lewat pembantu `owned_*`. Milik orang lain dijawab 404, bukan 403,
+agar nomor ID tidak bisa dipakai memetakan isi basis data.
+
+`recens/tests/test_auth.py` menjaga aturan itu per sumber daya, dan tiap uji
+membuktikan datanya memang masih ada — bukan sekadar tidak terlihat.
 
 Antarmuka mengikuti mode terang maupun gelap, serta menghormati
 `prefers-reduced-motion`. Dokumentasi API otomatis tersedia di `/docs`.

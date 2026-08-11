@@ -17,6 +17,27 @@ export class GuardrailError extends Error {
   }
 }
 
+/** Sesi habis atau belum ada. Dibedakan agar antarmuka bisa mengantar ke halaman masuk. */
+export class UnauthorizedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnauthorizedError";
+  }
+}
+
+/**
+ * Dipanggil sekali saat permintaan mana pun dijawab 401.
+ *
+ * Sesi bisa berakhir di tengah pekerjaan — kedaluwarsa, atau dicabut dari
+ * perangkat lain. Tanpa kait ini, layar hanya menampilkan pesan galat dan
+ * orang tidak tahu bahwa yang perlu dilakukan hanyalah masuk kembali.
+ */
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const config: RequestInit = { ...options, headers: { ...(options.headers ?? {}) } };
   if (config.body && !(config.body instanceof FormData)) {
@@ -33,6 +54,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     }
     const message =
       typeof detail === "string" ? detail : (detail?.message ?? "Permintaan gagal.");
+    if (response.status === 401) {
+      onUnauthorized?.();
+      throw new UnauthorizedError(message);
+    }
     throw new Error(message);
   }
   return payload as T;
@@ -44,7 +69,8 @@ export const api = {
     request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
   patch: <T,>(path: string, body: unknown) =>
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
-  del: <T,>(path: string) => request<T>(path, { method: "DELETE" }),
+  del: <T,>(path: string, body?: unknown) =>
+    request<T>(path, { method: "DELETE", body: body ? JSON.stringify(body) : undefined }),
   upload: <T,>(path: string, form: FormData) =>
     request<T>(path, { method: "POST", body: form }),
 };

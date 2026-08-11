@@ -1,12 +1,13 @@
 # Yang belum jadi
 
-Catatan serah-terima untuk melanjutkan Recens. Disusun setelah audit kode pada
-commit `3776ec0`, bukan dari ingatan.
+Catatan serah-terima untuk melanjutkan Recens. Disusun setelah audit kode, bukan
+dari ingatan.
 
-**Ringkasnya:** mesin produknya sudah jadi dan terverifikasi — 177 pengujian
-lulus, alur delapan langkah berjalan dari buat proyek sampai ekspor DOCX. Yang
-belum ada adalah **lapisan layanan**: hal-hal yang mengubah mesin menjadi
-produk yang bisa dipakai orang lain lewat internet.
+**Ringkasnya:** mesin produknya sudah jadi dan terverifikasi — 238 pengujian
+lulus, alur delapan langkah berjalan dari buat proyek sampai ekspor DOCX, dan
+tiap proyek kini terkunci ke pemiliknya. Yang belum ada adalah sisa **lapisan
+layanan**: hal-hal yang mengubah mesin menjadi produk yang bisa dipakai orang
+lain lewat internet.
 
 Urutan di bawah adalah urutan kerja yang saya sarankan.
 
@@ -14,48 +15,46 @@ Urutan di bawah adalah urutan kerja yang saya sarankan.
 
 ## P0 — Blocker keamanan
 
-Selama tiga hal ini belum ada, **jangan taruh di internet publik**. Aman dipakai
-sendiri di `localhost`, tidak aman dibagikan.
+Dua yang pertama sudah beres. Dua sisanya belum, dan selama itu **jangan taruh
+di internet publik**.
 
-### 1. Tidak ada autentikasi sama sekali
+### 1. ~~Tidak ada autentikasi sama sekali~~ — **selesai**
 
-Tidak ada login, sesi, token, maupun kata sandi. Seluruh endpoint terbuka.
+Sudah ada di `recens/core/auth.py` dan `recens/api/auth.py`:
 
-- **Berkas:** `recens/api/deps.py`, seluruh `recens/api/*.py`
-- **Yang ada sekarang:** tabel `accounts` dengan kolom `email` dan `plan`, tetapi
-  tanpa kolom kata sandi dan tanpa jalur masuk
-- **Kerjakan:** tambah `password_hash` ke tabel `accounts`, endpoint
-  daftar/masuk, sesi berbasis cookie httpOnly atau JWT, lalu dependency
-  `current_account` di FastAPI
-- **Perkiraan:** 1–2 hari
+- Kata sandi lewat PBKDF2-HMAC-SHA256, 600.000 iterasi, garam acak per akun.
+  Jumlah iterasi tersimpan di dalam string hash, jadi bisa dinaikkan tanpa
+  membatalkan kata sandi yang sudah ada.
+- Token sesi disimpan sebagai SHA-256; yang asli hanya pernah ada di kuki
+  peramban (`httponly`, `samesite=lax`, `secure` mengikuti `RECENS_HTTPS`).
+- CRUD lengkap: daftar, masuk, keluar, baca/ubah profil, ganti kata sandi,
+  hapus akun, daftar sesi aktif, cabut sesi.
+- Dependency `current_account` di FastAPI.
 
-### 2. Proyek tidak memeriksa kepemilikan
+**Yang masih kurang di sini:** pemulihan kata sandi lewat surel (lihat P4) dan
+pembatas laju pada `/api/auth/login` (lihat P0 #4). Tanpa yang kedua, kata sandi
+bisa ditebak berkali-kali tanpa hambatan.
 
-Ini yang paling berbahaya, dan tidak terlihat sampai dibaca kodenya:
+### 2. ~~Proyek tidak memeriksa kepemilikan~~ — **selesai**
 
-```python
-# recens/api/deps.py
-def get_project(project_id: int, conn = Depends(get_conn)) -> dict:
-    row = db.fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project_id,))
-    if row is None:
-        raise HTTPException(404, ...)
-    return dict(row)          # ← tidak ada pemeriksaan pemilik
-```
+`get_project` kini menyaring `account_id` dan dipakai sebagai *dependency*
+FastAPI, bukan dipanggil di dalam badan fungsi — sehingga pemeriksaannya
+berjalan sebelum kode rutenya dan tidak bisa terlewat di satu titik. Sumber daya
+yang diakses lewat ID sendiri (`sections`, `blocks`, `refs`, `datasets`,
+`analyses`, `revisions`, `rulesets`) ditelusuri balik ke pemiliknya lewat
+pembantu `owned_*` di `recens/api/deps.py`.
 
-Artinya `GET /api/projects/7` mengembalikan proyek nomor 7 milik siapa pun.
-Begitu juga `DELETE`. Kolom `account_id` sudah ada di tabel `projects` tetapi
-tidak pernah dipakai untuk menyaring.
+Dua celah yang baru terlihat saat dikerjakan, dan keduanya sudah ditutup:
 
-- **Kerjakan:** setelah autentikasi ada, ubah menjadi
-  `WHERE id = ? AND account_id = ?`, dan lakukan hal yang sama pada seluruh
-  sumber daya turunan — `sections`, `blocks`, `refs`, `datasets`, `analyses`,
-  `revisions`. Perhatikan bahwa endpoint seperti `PATCH /api/blocks/{id}` dan
-  `POST /api/analyses/{id}/insert` menerima ID langsung tanpa lewat proyek,
-  jadi keduanya perlu penelusuran ke pemiliknya.
-- **Perkiraan:** setengah hari setelah autentikasi selesai
-- **Saran:** tulis satu pengujian yang membuat dua akun lalu memastikan akun A
-  mendapat 404 saat menyentuh proyek akun B. Tanpa pengujian itu, kebocoran
-  seperti ini gampang kembali.
+- uji statistik bisa memakai `dataset_id` milik proyek lain;
+- hasil analisis bisa disisipkan ke naskah proyek lain lewat `section_id`.
+
+Keduanya sekarang menuntut kedua ID berada di proyek yang sama.
+
+**Jaganya:** `recens/tests/test_auth.py` — 60 uji yang memeriksa tiap sumber
+daya satu per satu, dan membuktikan datanya memang masih ada, bukan sekadar
+tidak terlihat. Jangan hapus berkas itu; kebocoran semacam ini gampang kembali
+diam-diam.
 
 ### 3. Unggahan tanpa batas ukuran
 
@@ -70,12 +69,18 @@ tidak pernah dipakai untuk menyaring.
 
 ### 4. Tanpa CORS dan rate limit
 
-Belum ada `CORSMiddleware` maupun pembatas laju. Endpoint yang memanggil model
-bahasa dan pencarian literatur bisa dikuras siapa pun.
+Belum ada `CORSMiddleware` maupun pembatas laju.
 
+- **Yang paling mendesak:** `POST /api/auth/login`. Sekarang kata sandi bisa
+  ditebak berkali-kali tanpa hambatan. PBKDF2 600.000 iterasi memang membuat
+  tiap percobaan mahal — itu juga berarti pengiriman beruntun bisa menghabiskan
+  CPU server. Batasi per alamat IP **dan** per surel.
+- Endpoint yang memanggil model bahasa dan pencarian literatur juga perlu
+  dibatasi. Keduanya kini sudah menuntut sesi, jadi tidak lagi terbuka untuk
+  siapa pun, tetapi satu akun masih bisa mengurasnya.
 - **Kerjakan:** `CORSMiddleware` dengan daftar asal yang eksplisit, plus
   `slowapi` atau pembatas di tingkat reverse proxy
-- **Perkiraan:** 2 jam
+- **Perkiraan:** 3 jam
 
 ---
 
@@ -117,7 +122,13 @@ menguji ke pengguna pertama. Untuk jalan A, `vite.config.ts` sudah memakai
 Skema dibuat lewat `CREATE TABLE IF NOT EXISTS` di `recens/db.py`. Begitu ada
 data pengguna sungguhan, mengubah skema tidak akan aman.
 
-- **Kerjakan:** pasang Alembic sebelum pengguna pertama masuk
+Ada penambal seadanya di `db._patch_columns()` — dipasang saat menambahkan
+`accounts.password_hash`. Ia hanya sanggup menambah kolom yang boleh kosong,
+dan **bukan** pengganti sistem migrasi. Begitu ada perubahan yang menuntut
+penulisan ulang data, penambal itu tidak akan menolong.
+
+- **Kerjakan:** pasang Alembic sebelum pengguna pertama masuk, lalu jadikan
+  `_patch_columns()` migrasi pertama dan hapus fungsinya
 - **Perkiraan:** setengah hari
 
 ### 8. Berkas pengguna ke penyimpanan objek
@@ -193,7 +204,9 @@ pengguna yang mau membayar.
 - **Logging** — tidak ada `logging` sama sekali; saat ini kegagalan hanya
   terlihat di respons HTTP
 - **Pemantauan galat** — Sentry atau sejenisnya
-- **Surel** — verifikasi akun dan pemulihan kata sandi belum ada
+- **Surel** — verifikasi alamat dan pemulihan kata sandi belum ada. Ini terasa
+  langsung: orang yang lupa kata sandinya sekarang kehilangan naskahnya, karena
+  tidak ada jalan masuk lain. Kerjakan lebih awal daripada terlihat.
 - **Cadangan** — belum ada, dan ini naskah skripsi orang; kehilangan data di
   sini artinya kehilangan pekerjaan berbulan-bulan
 - **Uji beban** — perakitan DOCX dan uji statistik memakan CPU; belum diketahui
@@ -213,6 +226,8 @@ Supaya waktu tidak habis di tempat yang salah:
 - Ekspor DOCX dengan penomoran romawi ke arab, field daftar isi, caption
   berbasis bab; plus PDF dan LaTeX
 - Tiga jaminan arsitektural: verifikasi sitasi, penelusuran angka, batas produk
+- Autentikasi dan isolasi antar-akun, beserta halaman masuk/daftar dan
+  pengelolaan akun di ruang kerja
 - Impor coretan pembimbing dari anotasi PDF dan komentar DOCX
 - Konversi naskah ke IMRAD, profil jurnal tujuan, glosarium dwibahasa
 - Antarmuka React lengkap dengan halaman depan dan mode gelap
@@ -221,9 +236,9 @@ Supaya waktu tidak habis di tempat yang salah:
 
 ## Urutan kerja yang disarankan
 
-1. **Autentikasi + kepemilikan proyek** (P0 #1, #2) — tanpa ini yang lain tidak
-   ada gunanya
-2. **Batas unggahan + CORS + rate limit** (P0 #3, #4) — cepat, tutup sekalian
+1. ~~Autentikasi + kepemilikan proyek~~ (P0 #1, #2) — **selesai**
+2. **Batas unggahan + CORS + rate limit** (P0 #3, #4) — cepat, dan pembatas laju
+   pada halaman masuk adalah lubang terbesar yang tersisa
 3. **Putuskan arsitektur deploy** (P1 #5) — menentukan bentuk pekerjaan berikutnya
 4. **Postgres + Alembic** (P1 #6, #7)
 5. **Uji jalur Claude API** (P2 #10) — bisa dikerjakan paralel, hanya perlu kunci
