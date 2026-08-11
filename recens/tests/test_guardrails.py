@@ -103,6 +103,49 @@ class TestReferensiKarangan:
         assert verdict.allowed is False
         assert verdict.rule == "tidak_mengarang_referensi"
 
+    @pytest.mark.parametrize(
+        "permintaan",
+        [
+            "Buatkan 10 referensi jurnal beserta DOI-nya",
+            "Tuliskan daftar pustaka lengkap dengan link",
+            "Sebutkan 5 jurnal tentang motivasi kerja",
+            "Kasih 15 artikel beserta sumbernya",
+            "Carikan 20 referensi untuk bab 2",
+        ],
+    )
+    def test_permintaan_daftar_referensi_ditolak(self, permintaan):
+        """Bentuk yang paling sering muncul dan paling berbahaya.
+
+        DOI, ISSN, dan tautan hanya sah bila datang dari basis data resmi.
+        Begitu model diminta menuliskannya sendiri, yang keluar pasti karangan —
+        dan hasilnya terlihat meyakinkan, itulah bahayanya. Jawabannya bukan
+        sekadar menolak, melainkan mengantar ke Pencarian Literatur.
+        """
+        verdict = G.guard_request(permintaan)
+        assert verdict.allowed is False, permintaan
+        assert verdict.rule == "tidak_mengarang_referensi"
+        assert "Pencarian Literatur" in verdict.alternative
+
+    @pytest.mark.parametrize(
+        "permintaan",
+        [
+            "Motivasi kerja adalah dorongan yang menggerakkan",
+            "Jelaskan bagaimana cara menulis daftar pustaka yang benar",
+            "Bagaimana format sitasi APA untuk jurnal?",
+            "Apa perbedaan referensi dan daftar pustaka?",
+            "Rapikan penulisan referensi yang sudah ada di pustaka saya",
+        ],
+    )
+    def test_pertanyaan_wajar_tentang_referensi_tidak_ikut_ditolak(self, permintaan):
+        """Penjaga yang terlalu galak sama merusaknya dengan yang bolong.
+
+        Bertanya cara menulis daftar pustaka bukan meminta referensi karangan.
+        Bila permintaan seperti ini ikut ditolak, orang akan berhenti memakai
+        fiturnya — dan penjaga yang dihindari tidak menjaga apa pun.
+        """
+        verdict = G.guard_request(permintaan)
+        assert verdict is None or verdict.allowed, permintaan
+
     def test_sitasi_di_luar_pustaka_dibuang_dari_keluaran(self):
         text = (
             "Kinerja dipengaruhi motivasi [[cite:sugiyono2021]] dan lingkungan kerja "

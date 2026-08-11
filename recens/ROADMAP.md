@@ -3,7 +3,7 @@
 Catatan serah-terima untuk melanjutkan Recens. Disusun setelah audit kode, bukan
 dari ingatan.
 
-**Ringkasnya:** mesin produknya sudah jadi dan terverifikasi — 275 pengujian
+**Ringkasnya:** mesin produknya sudah jadi dan terverifikasi — 294 pengujian
 lulus, alur delapan langkah berjalan dari buat proyek sampai ekspor DOCX, dan
 tiap proyek kini terkunci ke pemiliknya. Yang belum ada adalah sisa **lapisan
 layanan**: hal-hal yang mengubah mesin menjadi produk yang bisa dipakai orang
@@ -195,7 +195,8 @@ Semuanya sudah dinyatakan terbuka di README, bukan disembunyikan.
 
 | Fitur | Keadaan | Berkas |
 |---|---|---|
-| **OCR** | Ditolak terus terang saat berkas berupa foto | `recens/core/annotations.py` |
+| **OCR** | Ditolak terus terang saat berkas berupa foto, disertai jalan keluarnya | `recens/core/annotations.py` |
+| **Berkas .spv, .R, .dta, .rds** | Ditolak dengan petunjuk memakai jalur tempel atau ekspor ke .csv | `recens/core/stats/readers.py` |
 | **Gerbang pembayaran** | Hanya pembukuan kredit internal; QRIS, dompet digital, VA, kartu belum ada | `recens/core/credits.py` |
 | **Garuda/SINTA** | Adaptor menunggu `RECENS_GARUDA_BASE_URL`; tidak ada API publik yang stabil | `recens/core/citations/sources.py` |
 | **Embedding multibahasa** | Memakai BM25 leksikal lokal, bukan pencarian semantik | `recens/core/retrieval.py` |

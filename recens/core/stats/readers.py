@@ -198,13 +198,67 @@ def detect_kind(path: Path | str) -> str:
     }.get(suffix, "unknown")
 
 
+#: Berkas yang tidak bisa dibaca langsung, tetapi isinya tetap bisa diolah
+#: lewat jalur tempel. Tanpa petunjuk ini, mahasiswa yang mengunggah
+#: ``output.spv`` hanya melihat penolakan dan menyimpulkan Recens tidak bisa
+#: menangani hasil SPSS-nya — padahal bisa, hanya lewat pintu yang berbeda.
+JALUR_TEMPEL: dict[str, str] = {
+    ".spv": (
+        "Berkas .spv adalah format keluaran SPSS yang tertutup dan tidak bisa dibaca "
+        "langsung. Buka berkasnya di SPSS, salin tabel yang Anda butuhkan, lalu tempel "
+        "lewat 'Baca output tertempel' — angkanya dibaca apa adanya lalu dinarasikan. "
+        "Untuk mengolah datanya dari nol, ekspor dulu ke .sav atau .xlsx."
+    ),
+    ".spo": (
+        "Berkas .spo adalah keluaran SPSS versi lama. Salin tabelnya lalu tempel lewat "
+        "'Baca output tertempel'."
+    ),
+    ".r": (
+        "Berkas .R berisi skrip, bukan data. Tempel keluaran konsolnya lewat 'Baca "
+        "output tertempel' agar tabelnya distrukturkan dan dinarasikan, atau unggah "
+        "data mentahnya sebagai .csv untuk diolah dari nol."
+    ),
+    ".rdata": (
+        "Berkas .RData belum bisa dibaca langsung. Dari R, jalankan "
+        "write.csv(data, 'data.csv') lalu unggah berkas .csv-nya."
+    ),
+    ".rds": (
+        "Berkas .rds belum bisa dibaca langsung. Dari R, jalankan "
+        "write.csv(readRDS('berkas.rds'), 'data.csv') lalu unggah berkas .csv-nya."
+    ),
+    ".png": (
+        "Tangkapan layar belum bisa dibaca karena OCR belum tersambung. Salin tabelnya "
+        "sebagai teks lalu tempel lewat 'Baca output tertempel'."
+    ),
+    ".jpg": (
+        "Tangkapan layar belum bisa dibaca karena OCR belum tersambung. Salin tabelnya "
+        "sebagai teks lalu tempel lewat 'Baca output tertempel'."
+    ),
+    ".jpeg": (
+        "Tangkapan layar belum bisa dibaca karena OCR belum tersambung. Salin tabelnya "
+        "sebagai teks lalu tempel lewat 'Baca output tertempel'."
+    ),
+    ".dta": (
+        "Berkas Stata .dta belum didukung. Ekspor ke .csv dari Stata lalu unggah kembali."
+    ),
+    ".json": (
+        "Data dalam bentuk JSON belum dibaca langsung. Ubah ke .csv lebih dahulu."
+    ),
+}
+
+
 def load(path: Path | str) -> LoadedData:
     suffix = Path(path).suffix.lower()
     reader = READERS.get(suffix)
     if reader is None:
+        petunjuk = JALUR_TEMPEL.get(suffix)
+        if petunjuk:
+            raise UnsupportedDataFile(petunjuk)
         raise UnsupportedDataFile(
             f"Format '{suffix}' belum didukung. Format yang diterima: "
-            f"{', '.join(sorted(READERS))}."
+            f"{', '.join(sorted(READERS))}. Bila yang Anda punya adalah output jadi "
+            f"dari SPSS, SmartPLS, atau R, salin tabelnya lalu tempel lewat 'Baca "
+            f"output tertempel'."
         )
     return reader(path)
 

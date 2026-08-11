@@ -170,10 +170,16 @@ class TestLangkahTujuhDanDelapan:
         assert result["applied_rules"]["line_spacing"] == 1.5
         assert result["applied_rules"]["margins"]["left_cm"] == 3.0
 
-    def test_format_yang_tidak_berlaku_ditolak(self, client, project):
-        response = client.post(f"/api/projects/{project['id']}/export", json={"format": "latex"})
+    def test_format_tak_dikenal_ditolak(self, client, project):
+        """Format di luar ketiganya ditolak dengan menyebut pilihan yang ada.
+
+        Sebelumnya uji ini memastikan LaTeX ditolak untuk tugas akhir. Batasan
+        itu dicabut: rancangan produk menyebut DOCX, PDF, dan LaTeX tanpa
+        syarat, dan skripsi teknik lazim ditulis langsung di LaTeX.
+        """
+        response = client.post(f"/api/projects/{project['id']}/export", json={"format": "epub"})
         assert response.status_code == 400
-        assert "tidak berlaku" in response.json()["detail"]
+        assert "tidak dikenal" in response.json()["detail"]
 
     def test_prosiding_boleh_ekspor_latex(self, client):
         project = client.post(
@@ -318,3 +324,82 @@ def _all_text(sections) -> str:
         parts.extend(b["content"] for b in s["blocks"])
         parts.append(_all_text(s["children"]))
     return " ".join(parts)
+
+
+class TestKelengkapanTerhadapRancangan:
+    """Kesesuaian dengan PDF Rancangan Produk, diperiksa sebagai perilaku.
+
+    Ketiga hal di bawah pernah meleset dari rancangannya dan baru ketahuan saat
+    tiap fitur diuji satu per satu — bukan saat membaca kodenya.
+    """
+
+    def test_tiap_bagian_kerangka_punya_template(self, client):
+        """Bagian 4.1: "Template siap pakai untuk bagian standar".
+
+        Manfaat yang dijanjikan — "pengguna baru langsung bisa bekerja tanpa
+        menyusun perintah" — hanya berlaku bila tiap bagian yang dibuat
+        generator kerangka benar-benar punya templatenya. Sebelas peran sempat
+        kosong, termasuk kerangka berpikir yang disebut eksplisit di rancangan.
+        """
+        from recens.core.worktypes import WORK_TYPES
+
+        tersedia = {t["role"] for t in client.get("/api/templates").json()["templates"]}
+        peran = set()
+
+        def kumpulkan(sections):
+            for section in sections:
+                if section.role:
+                    peran.add(section.role)
+                kumpulkan(section.children)
+
+        for work_type in WORK_TYPES.values():
+            kumpulkan(work_type.structure)
+
+        assert peran <= tersedia, f"peran tanpa template: {sorted(peran - tersedia)}"
+
+    def test_ketiga_format_ekspor_berlaku_untuk_semua_jenis_karya(self, client):
+        """Bagian 4.3 menyebut DOCX, PDF, dan LaTeX tanpa syarat.
+
+        LaTeX sempat dibatasi hanya untuk jenis artikel. Mahasiswa teknik dan
+        matematika lazim menulis skripsi langsung di LaTeX.
+        """
+        catalog = client.get("/api/catalog").json()
+        for work_type in catalog["work_types"]:
+            assert set(work_type["export_formats"]) == {"docx", "pdf", "latex"}, work_type["key"]
+
+    @pytest.mark.parametrize(
+        "berkas,petunjuk",
+        [
+            ("output.spv", "tempel"),
+            ("analisis.R", "tempel"),
+            ("tangkapan.png", "tempel"),
+            ("data.dta", "csv"),
+            ("hasil.rds", "csv"),
+            ("aneh.xyz", "tempel"),
+        ],
+    )
+    def test_berkas_yang_ditolak_menunjukkan_jalan_keluarnya(
+        self, client, project, berkas, petunjuk
+    ):
+        """Bagian 5.2 menjanjikan .spv, tangkapan layar, dan output R bisa diolah.
+
+        Jalurnya memang berbeda — lewat tempel, bukan unggah — dan itu sah.
+        Yang tidak sah adalah penolakan buntu: mahasiswa yang mengunggah
+        output.spv lalu hanya membaca "format tidak didukung" akan menyimpulkan
+        Recens tidak bisa menangani hasil SPSS-nya, padahal bisa.
+        """
+        import io
+
+        response = client.post(
+            f"/api/projects/{project['id']}/datasets",
+            files={"file": (berkas, io.BytesIO(b"isi"), "application/octet-stream")},
+        )
+        assert response.status_code == 400
+        assert petunjuk in response.json()["detail"].lower(), response.json()["detail"]
+
+    def test_ekspor_latex_tugas_akhir_benar_benar_jadi(self, client, project):
+        response = client.post(f"/api/projects/{project['id']}/export", json={"format": "latex"})
+        assert response.status_code == 200, response.text
+        assert response.json()["size_bytes"] > 0
+        unduh = client.get(f"/api/projects/{project['id']}/export/download?format=latex")
+        assert unduh.status_code == 200

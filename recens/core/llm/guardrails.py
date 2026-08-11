@@ -114,6 +114,19 @@ POLA_REFERENSI_KARANGAN = (
     r"[^.]{0,40}\b(saja|sendiri|palsu|fiktif|asal|karangan)\b",
     r"\b(daftar pustaka|referensi)\b[^.]{0,30}\b(tanpa|nggak usah|tidak usah)\b"
     r"[^.]{0,30}\b(dicari|dicek|diverifikasi|nyata|asli)\b",
+    # Permintaan agar model menuliskan referensi lengkap dengan penandanya.
+    # DOI, ISSN, dan tautan hanya sah bila berasal dari basis data resmi; begitu
+    # model diminta menuliskannya sendiri, yang keluar pasti karangan. Inilah
+    # bentuk permintaan yang paling sering muncul dan paling berbahaya, karena
+    # hasilnya terlihat meyakinkan.
+    r"\b(buat|buatkan|bikin|tulis|tuliskan|sebutkan|berikan|kasih)\b[^.]{0,40}?"
+    r"\b(daftar pustaka|referensi|sitasi|jurnal|pustaka)\b[^.]{0,60}?"
+    r"\b(doi|issn|isbn|tautan|link|url|beserta sumbernya)\b",
+    # Permintaan sejumlah tertentu referensi lewat jalur penulisan — bukan lewat
+    # pencarian literatur. Angka pada permintaan itulah tandanya: yang diminta
+    # bukan bantuan mencari, melainkan daftar yang langsung jadi.
+    r"\b(buat|buatkan|bikin|tulis|tuliskan|sebutkan|berikan|kasih|carikan)\b[^.]{0,25}?"
+    r"\b\d{1,3}\b[^.]{0,25}?\b(daftar pustaka|referensi|sitasi|jurnal|pustaka|artikel)\b",
 )
 
 

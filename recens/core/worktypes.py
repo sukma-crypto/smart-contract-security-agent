@@ -340,7 +340,14 @@ class WorkType:
     #: Batas kata keras bila jenis karya memang menetapkannya (mis. artikel jurnal).
     hard_word_limit: int | None = None
     citation_style: str = "apa"
-    export_formats: tuple[str, ...] = ("docx", "pdf")
+    #: Ketiga format tersedia untuk seluruh jenis karya.
+    #:
+    #: Versi sebelumnya membatasi LaTeX hanya untuk jenis artikel, dengan alasan
+    #: di situlah ia paling sering dipakai. Pembatasan itu keliru: mahasiswa
+    #: teknik, matematika, dan fisika lazim menulis skripsi langsung di LaTeX,
+    #: dan menutup pilihannya berarti memaksa mereka merakit ulang dokumennya
+    #: di luar Recens — persis pekerjaan yang hendak dihapus produk ini.
+    export_formats: tuple[str, ...] = ("docx", "pdf", "latex")
     #: Fitur khusus yang aktif pada langkah 8.
     supervision_tracking: bool = False
     defense_mode: bool = False

@@ -245,6 +245,106 @@ SECTION_TEMPLATES: dict[str, dict] = {
             "Teknik analisis data beserta uji asumsi yang mendahuluinya.",
         ],
     },
+    "kerangka_berpikir": {
+        "label": "Kerangka Berpikir",
+        "outline": [
+            "Ringkasan hubungan antar-variabel yang sudah dibangun di landasan teori.",
+            "Alur logika: mengapa [variabel X] diduga memengaruhi [variabel Y], bukan sebaliknya.",
+            "Peran variabel lain bila ada — mediasi, moderasi, atau kontrol.",
+            "Kalimat penutup yang menyiapkan hipotesis pada sub-bab berikutnya.",
+            "Bagan kerangka berpikir: kotak variabel dan panah arah pengaruh.",
+        ],
+    },
+    "penelitian_terdahulu": {
+        "label": "Penelitian Terdahulu",
+        "outline": [
+            "Penelitian yang meneliti hubungan serupa, beserta metode dan temuannya.",
+            "Penelitian yang hasilnya berbeda atau bertentangan, dan dugaan penyebabnya.",
+            "Persamaan penelitian ini dengan penelitian terdahulu.",
+            "Perbedaannya — objek, variabel, periode, atau metode.",
+            "Celah yang belum terjawab, yang menjadi ruang bagi penelitian ini.",
+        ],
+    },
+    "manfaat": {
+        "label": "Manfaat Penelitian",
+        "outline": [
+            "Manfaat teoretis: sumbangan bagi pengembangan teori [bidang ilmu].",
+            "Manfaat praktis bagi [objek penelitian] dalam mengambil keputusan.",
+            "Manfaat bagi peneliti berikutnya sebagai rujukan atau titik lanjut.",
+        ],
+    },
+    "batasan": {
+        "label": "Batasan Masalah",
+        "outline": [
+            "Variabel yang diteliti dan yang sengaja tidak diteliti.",
+            "Batas objek, lokasi, dan periode pengambilan data.",
+            "Alasan pembatasan — keterbatasan waktu, akses data, atau fokus kajian.",
+        ],
+    },
+    "populasi_sampel": {
+        "label": "Populasi dan Sampel",
+        "outline": [
+            "Populasi: siapa atau apa, berapa jumlahnya, dan dari mana angka itu diperoleh.",
+            "Teknik sampling yang dipakai beserta alasannya.",
+            "Perhitungan ukuran sampel — rumus yang dipakai dan hasilnya.",
+            "Kriteria inklusi dan eksklusi responden bila ada.",
+        ],
+    },
+    "instrumen": {
+        "label": "Instrumen Penelitian",
+        "outline": [
+            "Bentuk instrumen: kuesioner, pedoman wawancara, atau lembar observasi.",
+            "Kisi-kisi instrumen: variabel, indikator, dan nomor butir.",
+            "Skala pengukuran yang dipakai beserta rentang nilainya.",
+            "Uji validitas dan reliabilitas: cara pengujian dan kriteria kelulusannya.",
+        ],
+    },
+    "teknik_analisis": {
+        "label": "Teknik Analisis Data",
+        "outline": [
+            "Analisis deskriptif: apa yang digambarkan dan dengan ukuran apa.",
+            "Uji asumsi klasik yang harus dipenuhi sebelum uji utama.",
+            "Uji hipotesis yang dipakai beserta alasan pemilihannya.",
+            "Kriteria pengambilan keputusan — taraf signifikansi dan pembanding tabelnya.",
+            "Perangkat bantu yang dipakai untuk mengolah data.",
+        ],
+    },
+    "hasil": {
+        "label": "Hasil Penelitian",
+        "outline": [
+            "Gambaran umum objek penelitian dan karakteristik responden.",
+            "Hasil uji instrumen: validitas dan reliabilitas tiap butir.",
+            "Hasil uji asumsi klasik, disertai tabel dan keputusannya.",
+            "Hasil uji hipotesis: tabel, angka, dan keputusan diterima atau ditolak.",
+            "Sajikan apa adanya lebih dahulu — penafsiran maknanya di pembahasan.",
+        ],
+    },
+    "pembahasan": {
+        "label": "Pembahasan",
+        "outline": [
+            "Jawaban atas tiap rumusan masalah, berurutan sesuai urutannya di BAB I.",
+            "Makna praktis angka yang diperoleh bagi [objek penelitian].",
+            "Kesesuaian atau pertentangan dengan teori yang dipakai.",
+            "Kesesuaian atau pertentangan dengan penelitian terdahulu, beserta dugaan penyebabnya.",
+            "Hasil yang tidak signifikan tetap dibahas — mengapa hubungan itu tidak terbukti.",
+        ],
+    },
+    "simpulan": {
+        "label": "Simpulan",
+        "outline": [
+            "Jawaban ringkas atas tiap rumusan masalah, satu paragraf satu rumusan.",
+            "Ditulis tanpa angka teknis dan tanpa istilah statistik yang belum dijelaskan.",
+            "Tidak memuat hal baru yang belum dibahas pada bab sebelumnya.",
+        ],
+    },
+    "saran": {
+        "label": "Saran",
+        "outline": [
+            "Saran praktis bagi [objek penelitian], langsung mengikuti temuan.",
+            "Saran bagi peneliti berikutnya: variabel, metode, atau objek yang layak ditambah.",
+            "Keterbatasan penelitian ini yang perlu diperbaiki penelitian berikutnya.",
+        ],
+    },
 }
 
 
