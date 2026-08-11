@@ -17,6 +17,20 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useCountUp, useReveal, useTypewriter, type Segment } from "@/landing/hooks";
+import {
+  BookStack,
+  CheckedDoc,
+  CoffeeCup,
+  DataFlask,
+  DeskLamp,
+  DotGrid,
+  GradCap,
+  JournalSearch,
+  LaptopBase,
+  PaperStack,
+  Pen,
+  RuledLines,
+} from "@/landing/illustrations";
 
 /* Naskah yang diketik di hero. Sengaja memakai kalimat akademik Indonesia
    sungguhan, lengkap dengan sitasi yang muncul utuh — bukan diketik — karena
@@ -229,9 +243,19 @@ function Hero({ onEnter }: { onEnter: () => void }) {
             </dl>
           </div>
 
-          {/* Demo mengetik */}
-          <div className="animate-rise" style={{ animationDelay: "180ms" }}>
-            <div className="relative rounded-xl border border-border bg-card shadow-[0_24px_60px_-28px_rgba(20,40,35,0.4)]">
+          {/* Meja kerja: laptop, buku, kertas, lampu, kopi.
+              Benda-benda diberi jalur sendiri di bawah alas laptop supaya tidak
+              menabrak keterangan, dan hanya muncul saat ruangnya cukup. */}
+          <div
+            className="animate-rise relative pb-24 lg:pb-28"
+            style={{ animationDelay: "180ms" }}
+          >
+            {/* Lampu meja menyorot dari kiri atas */}
+            <DeskLamp className="pointer-events-none absolute -left-16 -top-24 hidden w-24 opacity-90 2xl:block" />
+            {/* Tumpukan kertas di belakang kanan */}
+            <PaperStack className="pointer-events-none absolute -right-4 -top-12 hidden w-20 rotate-6 opacity-95 lg:block" />
+
+            <div className="relative rounded-t-xl border-[9px] border-b-0 border-ink bg-card shadow-[0_28px_70px_-30px_rgba(20,40,35,0.5)]">
               <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
                 <span className="size-2 rounded-full bg-clay/60" />
                 <span className="size-2 rounded-full bg-amber/60" />
@@ -281,7 +305,21 @@ function Hero({ onEnter }: { onEnter: () => void }) {
               </div>
             </div>
 
-            <p className="mt-3 text-center text-[11.5px] text-muted-foreground">
+            {/* Alas laptop */}
+            <LaptopBase className="-mt-px" />
+
+            {/* Garis meja: benda-benda berdiri di atasnya, sejajar. */}
+            <div className="pointer-events-none absolute inset-x-0 bottom-6 hidden items-end justify-between px-1 lg:flex">
+              <BookStack className="w-24 shrink-0" />
+              <Pen className="mb-1 w-11 -rotate-12 opacity-90" />
+              <CoffeeCup className="w-14 shrink-0" />
+            </div>
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-x-6 bottom-5 hidden h-px bg-ink/12 lg:block"
+            />
+
+            <p className="absolute inset-x-0 bottom-0 text-center text-[11.5px] text-muted-foreground">
               Sitasi tidak diketik — ia disisipkan dari pustaka proyek yang sudah terverifikasi.
             </p>
           </div>
@@ -387,6 +425,9 @@ function Problems() {
   return (
     <section id="masalah" className="relative isolate px-5 py-24">
         <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-72 bg-gradient-to-b from-violet/[0.06] to-transparent" />
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 text-ink/[0.05] [mask-image:radial-gradient(ellipse_at_center,black,transparent_72%)]">
+          <DotGrid />
+        </div>
       <div className="mx-auto max-w-6xl">
         <SectionHead eyebrow="Masalah yang diselesaikan" title="Menulis hanyalah gejala terakhir">
           Mayoritas penulis karya ilmiah tidak tersendat karena tidak bisa menulis. Mereka
@@ -425,7 +466,14 @@ function Problems() {
 
 function Workflow() {
   return (
-    <section id="alur" className="border-y border-border bg-card/40 px-5 py-24">
+    <section id="alur" className="relative isolate overflow-hidden border-y border-border bg-card/40 px-5 py-24">
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 text-ink/[0.045]">
+        <RuledLines />
+      </div>
+      <GradCap
+        aria-hidden
+        className="pointer-events-none absolute -right-6 top-10 hidden w-28 -rotate-12 opacity-[0.07] lg:block"
+      />
       <div className="mx-auto max-w-6xl">
         <SectionHead eyebrow="Alur kerja" title="Delapan langkah, satu alur">
           Yang menyesuaikan hanyalah panjang, struktur, dan sumber aturannya — makalah mingguan
@@ -463,19 +511,19 @@ function Engine() {
       title: "Angka dihitung, bukan ditaksir",
       body: "Uji validitas, reliabilitas, asumsi klasik, regresi, uji beda, sampai pembacaan output SEM-PLS dijalankan mesin statistik. Nilai r, t, dan F tabel dihitung dari distribusinya — bukan disalin dari lampiran.",
       accent: "from-lagoon/16 to-transparent",
-      Icon: FlaskConical,
+      Art: DataFlask,
     },
     {
       title: "Sitasi tertelusur ke sumbernya",
       body: "Metadata hanya diterima dari Crossref, OpenAlex, Semantic Scholar, dan jurnal nasional terakreditasi. Referensi hasil unggahan ditandai jelas sampai berhasil ditelusuri.",
       accent: "from-violet/16 to-transparent",
-      Icon: BookOpenCheck,
+      Art: JournalSearch,
     },
     {
       title: "Pedoman kampus jadi aturan",
       body: "PDF pedoman dibaca menjadi aturan yang mengikat outline, penomoran, gaya sitasi, dan batas panjang — lengkap dengan kutipan kalimat asal setiap aturan.",
       accent: "from-amber/16 to-transparent",
-      Icon: ShieldCheck,
+      Art: CheckedDoc,
     },
   ];
 
@@ -499,7 +547,7 @@ function Engine() {
                     item.accent,
                   )}
                 />
-                <item.Icon className="relative size-5 text-lagoon" />
+                <item.Art className="relative w-16" />
                 <h3 className="relative mt-4 font-serif text-[19px] font-semibold leading-snug">
                   {item.title}
                 </h3>
