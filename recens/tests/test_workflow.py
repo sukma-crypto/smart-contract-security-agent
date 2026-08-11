@@ -266,8 +266,18 @@ class TestKesehatanSistem:
         assert len(catalog["steps"]) == 8
 
     def test_ruang_kerja_web_tersaji(self, client):
-        assert client.get("/").status_code == 200
-        assert client.get("/static/app.js").status_code == 200
+        """Hasil build frontend ikut di-commit, sehingga aplikasi jalan tanpa Node."""
+        import re
+
+        response = client.get("/")
+        assert response.status_code == 200
+        assert "Recens" in response.text
+
+        # Berkas aset yang dirujuk index.html harus benar-benar tersaji.
+        assets = re.findall(r'(?:src|href)="(/static/assets/[^"]+)"', response.text)
+        assert assets, "index.html tidak merujuk satu pun aset hasil build"
+        for asset in assets:
+            assert client.get(asset).status_code == 200, f"aset hilang: {asset}"
 
 
 # --- pembantu ---------------------------------------------------------------

@@ -66,6 +66,9 @@ cp recens/.env.example .env      # opsional
 python -m recens                 # buka http://127.0.0.1:8000
 ```
 
+**Node tidak dibutuhkan untuk menjalankan.** Hasil build antarmuka ikut
+di-commit di `recens/web/`, sehingga perintah di atas cukup.
+
 **Kunci API tidak wajib.** Tanpa `ANTHROPIC_API_KEY`, yang memakai jalur
 deterministik hanyalah fitur penyusunan kalimat. Seluruh perhitungan statistik,
 pemeriksaan naskah, perenderan sitasi, perakitan format, dan ekspor berjalan
@@ -77,6 +80,22 @@ Menjalankan pengujian:
 ```bash
 python -m pytest recens/tests -q      # 175 pengujian
 ```
+
+### Menyunting antarmuka
+
+Antarmuka ditulis dengan React, TypeScript, Tailwind CSS v4, dan komponen
+bergaya shadcn/ui di atas Radix. Sumbernya ada di `recens/frontend/`.
+
+```bash
+cd recens/frontend
+npm install
+npm run dev      # http://localhost:5173, API diteruskan ke :8000
+npm run build    # menulis hasilnya ke recens/web/
+```
+
+Jalankan `python -m recens` di terminal lain saat memakai `npm run dev`.
+Setelah menyunting antarmuka, jalankan `npm run build` dan ikut sertakan
+`recens/web/` dalam commit — di situlah letak janji "berjalan tanpa Node".
 
 ---
 
@@ -241,13 +260,16 @@ recens/
 │   ├── exporters/              DOCX, PDF, LaTeX
 │   └── llm/                    penyedia, prompt, layanan, dan penjaga batas
 ├── api/                        router per langkah alur kerja
-├── web/                        ruang kerja (HTML/CSS/JS tanpa build)
+├── frontend/                   sumber antarmuka (React + Tailwind + shadcn/ui)
+│   ├── src/views/              satu berkas per langkah alur kerja
+│   ├── src/components/ui/      primitif shadcn di atas Radix
+│   └── src/lib/                pemanggilan API, tipe, dan state aplikasi
+├── web/                        hasil build antarmuka (ikut di-commit)
 └── tests/                      175 pengujian
 ```
 
-Antarmuka web adalah satu halaman tanpa tahap build: buka `/`, dan seluruh
-delapan langkah ada di sidebar kiri. Dokumentasi API otomatis tersedia di
-`/docs`.
+Buka `/` dan seluruh delapan langkah ada di sidebar kiri; antarmuka mengikuti
+mode terang maupun gelap. Dokumentasi API otomatis tersedia di `/docs`.
 
 ---
 
