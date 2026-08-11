@@ -74,7 +74,7 @@ function useTheme() {
   return { dark, toggle: () => setDark((value) => !value) };
 }
 
-export default function App() {
+export default function App({ onExit }: { onExit?: () => void }) {
   const { catalog, project, projects, view, loading, bootError, toasts, verdict, health } =
     useApp();
   const { setView, openProject, closeProject, dismissToast, dismissVerdict } = useActions();
@@ -107,14 +107,17 @@ export default function App() {
   return (
     <div className="flex h-full flex-col bg-background">
       <header className="flex shrink-0 items-center gap-3 px-5 py-3">
-        <div className="flex items-baseline gap-2.5">
+        <button
+          onClick={onExit}
+          className="flex items-baseline gap-2.5 rounded transition-opacity hover:opacity-70"
+        >
           <span className="font-serif text-[19px] font-semibold leading-none tracking-tight">
             Recens
           </span>
           <span className="hidden text-[11px] text-faint lg:inline">
             alat menulis karya ilmiah
           </span>
-        </div>
+        </button>
         <div className="flex-1" />
         <SimpleSelect
           className="h-8 w-[min(19rem,44vw)] border-transparent bg-transparent hover:border-input"

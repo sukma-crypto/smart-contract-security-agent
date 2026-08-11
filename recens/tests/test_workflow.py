@@ -279,6 +279,15 @@ class TestKesehatanSistem:
         for asset in assets:
             assert client.get(asset).status_code == 200, f"aset hilang: {asset}"
 
+    def test_halaman_depan_dan_ruang_kerja_dilayani_berkas_yang_sama(self, client):
+        """Pemilihan halaman terjadi di sisi klien, jadi keduanya berbagi index.html."""
+        assert client.get("/app").text == client.get("/").text
+        assert client.get("/app/menulis").status_code == 200
+
+    def test_alamat_tak_dikenal_tetap_404(self, client):
+        """Routing sisi klien tidak boleh menutupi alamat yang memang salah."""
+        assert client.get("/entah-apa").status_code == 404
+
 
 # --- pembantu ---------------------------------------------------------------
 

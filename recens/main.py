@@ -83,6 +83,12 @@ def health() -> dict:
 if WEB_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
 
-    @app.get("/", include_in_schema=False)
-    def workspace() -> FileResponse:
+    def _index() -> FileResponse:
         return FileResponse(WEB_DIR / "index.html")
+
+    # Halaman depan di "/" dan ruang kerja di "/app" dilayani berkas yang sama;
+    # pemilihannya terjadi di sisi klien. Rute ditulis eksplisit agar alamat
+    # yang tidak dikenal tetap menghasilkan 404 yang jujur.
+    app.get("/", include_in_schema=False)(_index)
+    app.get("/app", include_in_schema=False)(_index)
+    app.get("/app/{path:path}", include_in_schema=False)(lambda path: _index())

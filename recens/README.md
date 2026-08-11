@@ -78,7 +78,7 @@ sedang aktif.
 Menjalankan pengujian:
 
 ```bash
-python -m pytest recens/tests -q      # 175 pengujian
+python -m pytest recens/tests -q      # 177 pengujian
 ```
 
 ### Menyunting antarmuka
@@ -261,15 +261,22 @@ recens/
 │   └── llm/                    penyedia, prompt, layanan, dan penjaga batas
 ├── api/                        router per langkah alur kerja
 ├── frontend/                   sumber antarmuka (React + Tailwind + shadcn/ui)
+│   ├── src/landing/            halaman depan beserta animasinya
 │   ├── src/views/              satu berkas per langkah alur kerja
 │   ├── src/components/ui/      primitif shadcn di atas Radix
 │   └── src/lib/                pemanggilan API, tipe, dan state aplikasi
 ├── web/                        hasil build antarmuka (ikut di-commit)
-└── tests/                      175 pengujian
+└── tests/                      177 pengujian
 ```
 
-Buka `/` dan seluruh delapan langkah ada di sidebar kiri; antarmuka mengikuti
-mode terang maupun gelap. Dokumentasi API otomatis tersedia di `/docs`.
+Aplikasi punya dua wajah yang sengaja dibedakan. `/` adalah halaman depan —
+berwarna, beranimasi, tempat menjelaskan produk. `/app` adalah ruang kerja yang
+sengaja tenang, karena dipakai berjam-jam untuk menulis; di sanalah naskah
+menjadi objek utamanya dan perkakas mundur ke belakang. Keduanya dilayani
+`index.html` yang sama dan dipilih di sisi klien.
+
+Antarmuka mengikuti mode terang maupun gelap, serta menghormati
+`prefers-reduced-motion`. Dokumentasi API otomatis tersedia di `/docs`.
 
 ---
 
