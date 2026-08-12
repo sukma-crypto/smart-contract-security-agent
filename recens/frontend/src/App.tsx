@@ -497,7 +497,19 @@ function FocusPicker() {
   if (!project || !presets.length) return null;
 
   const current = project.focus_key;
-  const known = presets.some((p) => p.key === current);
+  const sendiri = current === "sendiri";
+  const [merakit, setMerakit] = React.useState(sendiri);
+
+  const simpan = (focus: string | string[], nama: string) =>
+    void run(async () => {
+      await api.patch(`/projects/${project.id}`, { focus });
+      await refreshProject();
+      toast(`Fokus diubah ke ${nama}.`);
+    });
+
+  // Langkah pertama adalah wadahnya, bukan pekerjaan yang bisa dilewati, jadi
+  // ia tidak ditawarkan untuk dicentang.
+  const dapatDipilih = project.steps.filter((step) => step.key !== "buat_proyek");
 
   return (
     <div className="mb-3 hidden md:block">
@@ -506,19 +518,50 @@ function FocusPicker() {
       </p>
       <SimpleSelect
         className="mt-1 h-8 w-full text-[12px]"
-        value={known ? current : ""}
-        placeholder="Pilihan sendiri"
+        value={sendiri ? "sendiri" : current}
+        placeholder="Pilih fokus"
         onValueChange={(value) => {
           if (!value) return;
-          void run(async () => {
-            await api.patch(`/projects/${project.id}`, { focus: value });
-            await refreshProject();
-            const preset = presets.find((p) => p.key === value);
-            toast(`Fokus diubah ke ${preset?.label ?? value}.`);
-          });
+          if (value === "sendiri") return setMerakit(true);
+          setMerakit(false);
+          simpan(value, presets.find((p) => p.key === value)?.label ?? value);
         }}
-        options={presets.map((p) => ({ value: p.key, label: p.label }))}
+        options={[
+          ...presets.map((p) => ({ value: p.key, label: p.label })),
+          { value: "sendiri", label: "Atur sendiri…" },
+        ]}
       />
+
+      {/* Preset menutup sebagian besar keadaan, tetapi tidak semuanya — ada
+          yang datang hanya untuk BAB V, ada yang menggabungkan olah data
+          dengan kajian pustaka. Daripada menambah preset tiap kali muncul
+          keadaan baru, langkahnya bisa dirakit sendiri. */}
+      {merakit ? (
+        <div className="mt-2 rounded-lg border border-border bg-card/60 p-2">
+          <p className="px-1 pb-1.5 text-[10.5px] leading-snug text-muted-foreground">
+            Centang langkah yang ingin ditonjolkan. Sisanya tetap bisa dibuka.
+          </p>
+          {dapatDipilih.map((step) => (
+            <label
+              key={step.key}
+              className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-[12px] hover:bg-muted/60"
+            >
+              <input
+                type="checkbox"
+                className="size-3.5 accent-lagoon"
+                checked={step.focused}
+                onChange={(event) => {
+                  const dipilih = dapatDipilih
+                    .filter((s) => (s.key === step.key ? event.target.checked : s.focused))
+                    .map((s) => s.key);
+                  simpan(dipilih, dipilih.length ? "pilihan sendiri" : "seluruh langkah");
+                }}
+              />
+              <span className="leading-snug">{step.title}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

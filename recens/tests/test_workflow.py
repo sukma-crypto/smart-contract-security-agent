@@ -521,6 +521,25 @@ class TestFokusPadaProyek:
         assert data["tracks_word_target"] is True
         assert data["target_words"] > 0
 
+    def test_fokus_rakit_sendiri_disimpan_apa_adanya(self, client, project):
+        """Preset tidak menutup semua keadaan.
+
+        Ada yang datang hanya untuk BAB V, ada yang menggabungkan olah data
+        dengan kajian pustaka. Daripada menambah preset tiap kali muncul
+        keadaan baru, langkahnya bisa dirakit sendiri.
+        """
+        pid = project["id"]
+        hasil = client.patch(
+            f"/api/projects/{pid}", json={"focus": ["menulis", "ekspor_revisi"]}
+        ).json()
+
+        assert hasil["focus_key"] == "sendiri"
+        assert hasil["focus"] == ["buat_proyek", "menulis", "ekspor_revisi"]
+        terfokus = {s["key"] for s in hasil["steps"] if s["focused"]}
+        assert terfokus == {"buat_proyek", "menulis", "ekspor_revisi"}
+        # Yang di luar rakitan tetap aktif — fokus tidak pernah mengunci.
+        assert all(s["active"] for s in hasil["steps"] if s["key"] != "olah_data")
+
     def test_katalog_menawarkan_preset(self, client):
         katalog = client.get("/api/catalog").json()
         kunci = {p["key"] for p in katalog["focus_presets"]}
@@ -723,3 +742,4 @@ class TestEksporSebagian:
         )
         assert ditolak.status_code == 400
         assert "bukan bab pada proyek ini" in ditolak.json()["detail"]
+
