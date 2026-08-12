@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from .. import db
 from ..core.llm import services
-from ..core.stats import engine, methodology, narrative, qualitative, readers
+from ..core.stats import engine, methodology, narrative, qualitative, readers, translate
 from .deps import (
     charge_for,
     current_account,
@@ -505,17 +505,65 @@ def parse_pasted(
     conn: sqlite3.Connection = Depends(get_conn),
     project: dict = Depends(get_project),
 ) -> dict:
-    """Baca tabel output yang ditempel dari SPSS, SmartPLS, Lisrel, atau R.
+    """Baca keluaran jadi dari SPSS, R, SmartPLS, atau Lisrel menjadi hasil siap naskah.
 
-    Untuk berkas .spv dan tangkapan layar, jalur inilah yang dipakai: angkanya
-    distrukturkan lalu dinarasikan, tanpa diubah.
+    Jalur ini yang dipakai mahasiswa yang datanya sudah diolah di tempat lain —
+    termasuk pemilik berkas .spv dan tangkapan layar, yang tidak bisa dibaca
+    langsung tetapi isinya bisa disalin.
+
+    Hasilnya disimpan sebagai analisis sungguhan, bukan sekadar dikembalikan
+    untuk dilihat. Dengan begitu ia mengalir lewat jalur yang sama dengan uji
+    yang dihitung Recens sendiri: bisa dinarasikan, dinomori, dan disisipkan ke
+    BAB IV. Tanpa itu, pekerjaannya berhenti di layar dan mahasiswa tetap harus
+    mengetik ulang tabelnya ke Word — persis kesulitan yang hendak dihapus.
     """
-    table = readers.parse_pasted_table(payload.text)
-    if not table["rows"]:
-        raise HTTPException(400, "Tidak ada baris tabel yang bisa dibaca dari teks tersebut.")
+    project_id = project["id"]
+    hasil = translate.translate(payload.text)
+    if not hasil:
+        raise HTTPException(
+            400,
+            "Tidak ada tabel yang bisa dibaca dari teks tersebut. Salin tabel keluaran "
+            "beserta baris judul kolomnya, lalu tempel kembali.",
+        )
+
+    tersimpan = []
+    for index, result in enumerate(hasil):
+        label = result.label if len(hasil) > 1 else (payload.label or result.label)
+        result.label = label
+        narrative_text = narrative.draft_narrative(result)
+        analysis_id = db.insert(
+            conn,
+            "analyses",
+            project_id=project_id,
+            dataset_id=None,
+            method=result.method,
+            params_json=json.dumps(result.params, ensure_ascii=False),
+            result_json=json.dumps(result.to_dict(), ensure_ascii=False),
+            narrative=narrative_text,
+            # Ditandai berbeda dari "python" supaya jejaknya jujur: angkanya
+            # bukan hasil hitungan Recens, melainkan bacaan atas keluaran orang
+            # lain. Perbedaan itu penting bila hasilnya dipersoalkan kemudian.
+            engine="tempel",
+            created_at=db.now(),
+        )
+        tersimpan.append(
+            {
+                "id": analysis_id,
+                "urutan": index + 1,
+                "method": result.method,
+                "label": result.label,
+                "result": result.to_dict(),
+                "narrative": narrative_text,
+                "dikenali": not result.method.endswith("_tabel"),
+            }
+        )
+
+    dikenali = sum(1 for t in tersimpan if t["dikenali"])
     return {
-        "label": payload.label,
-        "table": table,
+        "analyses": tersimpan,
+        "total": len(tersimpan),
+        "dikenali": dikenali,
+        "sumber": hasil[0].params.get("sumber", "tabel"),
         "note": (
             "Angka dibaca apa adanya dari output yang Anda tempel. Recens tidak "
             "menghitung ulang maupun mengubahnya."

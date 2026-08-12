@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from recens.core.stats import engine, methodology
+from recens.core.stats import engine, methodology, narrative, translate
 from recens.core.stats.narrative import draft_narrative, untraceable_numbers
 
 
@@ -468,3 +468,166 @@ class TestPemanduMetodologi:
 
     def test_ukuran_sampel_regresi(self):
         assert methodology.sample_size_for_regression(3)["sample_size"] == 74
+
+
+SPSS_REGRESI = """Model Summary
+Model\tR\tR Square\tAdjusted R Square\tStd. Error of the Estimate
+1\t.812a\t.659\t.648\t2.31449
+a. Predictors: (Constant), Disiplin, Motivasi
+
+ANOVAa
+Model\t\tSum of Squares\tdf\tMean Square\tF\tSig.
+1\tRegression\t612.345\t2\t306.173\t57.164\t.000b
+\tResidual\t316.855\t59\t5.370\t\t
+\tTotal\t929.200\t61\t\t\t
+a. Dependent Variable: Kinerja
+
+Coefficientsa
+Model\t\tUnstandardized Coefficients\t\tStandardized Coefficients\tt\tSig.
+\t\tB\tStd. Error\tBeta\t\t
+1\t(Constant)\t4.212\t2.145\t\t1.964\t.054
+\tMotivasi\t.523\t.098\t.512\t5.337\t.000
+\tDisiplin\t.311\t.087\t.343\t3.575\t.001
+a. Dependent Variable: Kinerja"""
+
+
+def _teks_naskah(sections) -> str:
+    bagian = []
+    for section in sections:
+        for block in section.get("blocks", []):
+            bagian.append(block.get("content", ""))
+        bagian.append(_teks_naskah(section.get("children", [])))
+    return " ".join(bagian)
+
+
+class TestPenerjemahOutputJadi:
+    """Keluaran jadi diterjemahkan menjadi narasi, angkanya tidak disentuh."""
+
+    def test_tiga_tabel_regresi_terbaca_terpisah(self):
+        hasil = translate.translate(SPSS_REGRESI)
+        assert [h.method for h in hasil] == [
+            "tempel_model_summary", "tempel_anova_regresi", "tempel_koefisien",
+        ]
+
+    def test_angka_tidak_dihitung_ulang(self):
+        model = translate.translate(SPSS_REGRESI)[0]
+        assert model.values["r_square"] == pytest.approx(0.659)
+        assert model.values["adjusted_r_square"] == pytest.approx(0.648)
+
+    def test_f_hitung_tidak_tertukar_dengan_derajat_bebas(self):
+        """Kolom "F" pernah tercocokkan dengan "df" karena "f" ada di dalamnya.
+
+        Akibatnya narasi menuliskan "F hitung sebesar 2" — bukan sekadar salah,
+        melainkan salah yang tampak masuk akal sehingga lolos dari pembacaan
+        sekilas dan baru ketahuan di ruang sidang.
+        """
+        anova = translate.translate(SPSS_REGRESI)[1]
+        assert anova.values["f_hitung"] == pytest.approx(57.164)
+        assert anova.values["df1"] == 2
+        assert anova.values["df2"] == 59
+
+    def test_persamaan_regresi_disusun(self):
+        koef = translate.translate(SPSS_REGRESI)[2]
+        assert koef.params["persamaan"] == "Kinerja = 4.212 + 0.523 Motivasi + 0.311 Disiplin"
+
+    def test_derajat_bebas_dari_anova_dipakai_menghitung_t_tabel(self):
+        """Derajat bebas hanya tercetak di ANOVA, tetapi yang membutuhkannya
+        untuk membandingkan t hitung adalah tabel Coefficients."""
+        koef = translate.translate(SPSS_REGRESI)[2]
+        assert koef.values["t_tabel"] == pytest.approx(engine.t_table(59), abs=1e-3)
+
+    def test_seluruh_angka_narasi_tertelusur(self):
+        """Penjaga yang sama dengan uji yang dihitung sendiri berlaku di sini."""
+        for hasil in translate.translate(SPSS_REGRESI):
+            teks = draft_narrative(hasil)
+            assert untraceable_numbers(teks, hasil) == []
+
+    def test_hasil_tidak_signifikan_dilaporkan_apa_adanya(self):
+        teks = SPSS_REGRESI.replace("\t3.575\t.001", "\t1.575\t.412")
+        koef = translate.translate(teks)[2]
+        assert "belum terbukti berpengaruh signifikan" in " ".join(koef.findings)
+
+    def test_alpha_bila_butir_dihapus_bukan_alpha_instrumen(self):
+        """Tabel Item-Total memuat kolom "Cronbach's Alpha if Item Deleted".
+
+        Terbaca sebagai alpha instrumen, ia melaporkan keandalan yang tidak
+        pernah dihitung siapa pun.
+        """
+        teks = """Item-Total Statistics
+\tCorrected Item-Total Correlation\tCronbach's Alpha if Item Deleted
+X1.1\t.612\t.858
+X1.2\t.248\t.891"""
+        hasil = translate.translate(teks)
+        assert hasil[0].method == "tempel_item_total"
+        assert "cronbach_alpha" not in hasil[0].values
+
+    def test_tabel_uji_beda_tidak_terbaca_sebagai_uji_normalitas(self):
+        """Kolom "Sig." ada di hampir setiap tabel SPSS, jadi ia bukan penanda."""
+        teks = """Independent Samples Test
+\t\tLevene's Test for Equality of Variances\t\tt-test for Equality of Means\t\t\t
+\t\tF\tSig.\tt\tdf\tSig. (2-tailed)\tMean Difference
+Nilai\tEqual variances assumed\t.673\t.415\t2.841\t60\t.006\t3.412"""
+        hasil = translate.translate(teks)
+        assert hasil[0].method == "tempel_uji_beda"
+
+    def test_tabel_asing_tetap_dirapikan_tanpa_narasi_karangan(self):
+        hasil = translate.translate("Tabel Aneh\nA\tB\n1\t2")
+        assert len(hasil) == 1
+        assert hasil[0].findings == []
+        assert "belum mengenali" in " ".join(hasil[0].warnings)
+
+    def test_tempelan_kosong_tidak_menghasilkan_apa_pun(self):
+        assert translate.translate("   ") == []
+
+    def test_keluaran_r_terbaca(self):
+        teks = """Coefficients:
+            Estimate Std. Error t value Pr(>|t|)
+(Intercept)  4.21200    2.14500   1.964   0.0544 .
+Motivasi     0.52300    0.09800   5.337 1.53e-06 ***
+---
+Multiple R-squared:  0.659,\tAdjusted R-squared:  0.6475
+F-statistic: 57.16 on 1 and 60 DF,  p-value: 2.2e-14"""
+        hasil = translate.translate(teks)
+        assert [h.method for h in hasil] == ["tempel_model_summary", "tempel_koefisien"]
+        assert hasil[0].params["sumber"] == "R"
+        assert hasil[0].values["r_square"] == pytest.approx(0.659)
+
+
+class TestJalurTempelDiAPI:
+    def test_output_tertempel_tersimpan_sebagai_analisis(self, client, project):
+        jawaban = client.post(
+            f"/api/projects/{project['id']}/analyses/pasted", json={"text": SPSS_REGRESI}
+        )
+        assert jawaban.status_code == 201
+        data = jawaban.json()
+        assert (data["total"], data["dikenali"], data["sumber"]) == (3, 3, "SPSS")
+        assert len(client.get(f"/api/projects/{project['id']}/analyses").json()) == 3
+
+    def test_hasil_tempelan_bisa_disisipkan_ke_naskah(self, client, project):
+        """Inilah pokoknya: tanpa ini pekerjaannya berhenti di layar, dan
+        mahasiswa tetap harus mengetik ulang tabelnya sendiri ke Word."""
+        data = client.post(
+            f"/api/projects/{project['id']}/analyses/pasted", json={"text": SPSS_REGRESI}
+        ).json()
+        analysis_id = data["analyses"][2]["id"]
+
+        sisip = client.post(f"/api/analyses/{analysis_id}/insert", json={})
+        assert sisip.status_code == 200
+        assert sisip.json()["inserted"] >= 2
+
+        naskah = client.get(f"/api/projects/{project['id']}/manuscript").json()
+        assert "Persamaan regresi" in _teks_naskah(naskah["sections"])
+
+    def test_teks_tanpa_tabel_ditolak_dengan_petunjuk(self, client, project):
+        jawaban = client.post(
+            f"/api/projects/{project['id']}/analyses/pasted", json={"text": "halo"}
+        )
+        assert jawaban.status_code == 400
+        assert "judul kolom" in jawaban.json()["detail"]
+
+    def test_jejak_menandai_angkanya_bukan_hitungan_recens(self, conn, client, project):
+        client.post(
+            f"/api/projects/{project['id']}/analyses/pasted", json={"text": SPSS_REGRESI}
+        )
+        baris = conn.execute("SELECT engine FROM analyses LIMIT 1").fetchone()
+        assert baris["engine"] == "tempel"

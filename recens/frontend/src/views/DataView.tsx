@@ -72,6 +72,7 @@ export function DataView() {
       <Tabs defaultValue="uji">
         <TabsList className="mb-3.5">
           <TabsTrigger value="uji">Menjalankan uji</TabsTrigger>
+          <TabsTrigger value="tempel">Baca output jadi</TabsTrigger>
           <TabsTrigger value="pemandu">Pemandu metodologi</TabsTrigger>
           <TabsTrigger value="kualitatif">Analisis kualitatif</TabsTrigger>
           <TabsTrigger value="jejak">Jejak analisis ({analyses.length})</TabsTrigger>
@@ -80,6 +81,9 @@ export function DataView() {
         <TabsContent value="uji" className="flex flex-col gap-3.5">
           <UploadPanel accepted={methods.accepted_files} datasets={datasets} reload={load} />
           <RunPanel methods={methods.methods} datasets={datasets} reload={load} />
+        </TabsContent>
+        <TabsContent value="tempel" className="flex flex-col gap-3.5">
+          <PastePanel reload={load} />
         </TabsContent>
         <TabsContent value="pemandu" className="flex flex-col gap-3.5">
           <MethodologyPanel />
@@ -778,6 +782,143 @@ function QualitativePanel({ datasets }: { datasets: Dataset[] }) {
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+interface HasilTempel {
+  id: number;
+  urutan: number;
+  method: string;
+  label: string;
+  result: AnalysisResponse["result"];
+  narrative: string;
+  dikenali: boolean;
+}
+
+interface JawabanTempel {
+  analyses: HasilTempel[];
+  total: number;
+  dikenali: number;
+  sumber: string;
+  note: string;
+}
+
+/**
+ * Jalur bagi yang datanya sudah diolah di tempat lain.
+ *
+ * Yang dibawa mahasiswa ini bukan data mentah melainkan hasil jadi, dan
+ * kesulitannya bukan menghitung melainkan menuliskan. Ia sudah tahu Sig.-nya
+ * 0,000; yang belum ia tahu adalah kalimat apa yang harus berdiri di atas
+ * angka itu di dalam naskahnya.
+ */
+function PastePanel({ reload }: { reload: () => Promise<void> }) {
+  const { project } = useApp();
+  const { run, refreshProject, toast } = useActions();
+  const { withBusy, isBusy } = useBusy();
+  const [teks, setTeks] = React.useState("");
+  const [hasil, setHasil] = React.useState<JawabanTempel | null>(null);
+
+  const baca = () =>
+    withBusy("baca", async () => {
+      if (!teks.trim()) return toast("Tempel dulu tabel keluarannya.", "error");
+      const jawaban = await run(() =>
+        api.post<JawabanTempel>(`/projects/${project!.id}/analyses/pasted`, { text: teks }),
+      );
+      if (!jawaban) return;
+      setHasil(jawaban);
+      toast(`${jawaban.total} tabel terbaca, ${jawaban.dikenali} dikenali jenisnya.`);
+      await reload();
+    });
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>Baca output jadi</CardTitle>
+          <CardDescription>
+            Sudah mengolah data di SPSS, R, SmartPLS, atau Lisrel? Salin tabel keluarannya
+            beserta baris judul kolom, lalu tempel di sini. Recens menyusunnya menjadi tabel
+            bernomor dan narasi BAB IV yang bisa langsung disisipkan ke naskah.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Textarea
+            rows={10}
+            className="font-mono text-[12px]"
+            value={teks}
+            onChange={(e) => setTeks(e.target.value)}
+            placeholder={
+              "Model Summary\nModel\tR\tR Square\tAdjusted R Square\n1\t.812\t.659\t.648\n\n" +
+              "Boleh menempel beberapa tabel sekaligus — Model Summary, ANOVA, dan Coefficients " +
+              "akan dibaca terpisah."
+            }
+          />
+          <Row className="mt-3">
+            <Button onClick={baca} loading={isBusy("baca")}>
+              Baca dan susun narasi
+            </Button>
+            {teks ? (
+              <Button variant="ghost" size="sm" onClick={() => { setTeks(""); setHasil(null); }}>
+                Kosongkan
+              </Button>
+            ) : null}
+          </Row>
+
+          <Callout className="mt-3.5" title="Angka Anda tidak diubah">
+            Recens membaca angka apa adanya dari yang Anda tempel — tidak menghitung ulang,
+            tidak membulatkan, tidak memperbaiki. Yang ditambahkan hanyalah nilai r, t, dan F
+            tabel sebagai pembanding, dan asalnya disebut terbuka di dalam narasinya.
+          </Callout>
+        </CardContent>
+      </Card>
+
+      {hasil?.analyses.map((satu) => (
+        <Card key={satu.id}>
+          <CardHeader>
+            <CardTitle className="flex flex-wrap items-center gap-2">
+              {satu.label}
+              <Badge variant={satu.dikenali ? "success" : "warning"}>
+                {satu.dikenali ? `dikenali · ${hasil.sumber}` : "belum dikenali jenisnya"}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {satu.result.tables.map((tabel, index) => (
+              <div key={index}>
+                <p className="mb-1.5 text-[12.5px] font-medium">{tabel.title}</p>
+                <DataTable columns={tabel.columns} rows={tabel.rows.map((r) => r.map(cellText))} />
+                {tabel.note ? (
+                  <p className="mt-1.5 text-[11px] text-muted-foreground">{tabel.note}</p>
+                ) : null}
+              </div>
+            ))}
+            {satu.narrative ? (
+              <div className="rounded-md border border-border bg-muted/40 px-3.5 py-3">
+                <p className="font-serif text-[14px] leading-relaxed">{satu.narrative}</p>
+              </div>
+            ) : null}
+            <Row>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  run(async () => {
+                    const jawaban = await api.post<{ inserted: number }>(
+                      `/analyses/${satu.id}/insert`,
+                      {},
+                    );
+                    toast(`${jawaban.inserted} blok disisipkan ke bagian hasil.`);
+                    await refreshProject();
+                  })
+                }
+              >
+                Sisipkan ke naskah
+              </Button>
+            </Row>
+          </CardContent>
+        </Card>
+      ))}
+    </>
   );
 }
 
