@@ -246,11 +246,65 @@ function SearchPanel({ onAdded }: { onAdded: () => Promise<void> }) {
               ))}
             </div>
           </div>
-        ) : null}
+        ) : (
+          <SumberResmi />
+        )}
       </CardContent>
     </Card>
   );
 }
+
+/**
+ * Keempat basis data yang ditelusuri, sebelum pencarian pertama dijalankan.
+ *
+ * Kolom kosong di bawah kotak pencarian menyembunyikan hal yang justru
+ * menjadi alasan fitur ini ada: metadata tidak diketik dan tidak dikarang,
+ * melainkan ditarik dari basis data resmi. Mahasiswa yang tidak tahu itu akan
+ * mengira Recens "mencari di internet" — dan pertanyaan pertama pembimbing
+ * atas daftar pustaka selalu dari mana sumbernya.
+ */
+function SumberResmi() {
+  return (
+    <div>
+      <p className="mb-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
+        Yang ditelusuri
+      </p>
+      <div className="grid gap-2.5 sm:grid-cols-2">
+        {SUMBER.map((item) => (
+          <div key={item.nama} className="rounded-lg border border-border bg-muted/40 p-3">
+            <p className="text-[12.5px] font-semibold">{item.nama}</p>
+            <p className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
+              {item.isi}
+            </p>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-[11.5px] leading-relaxed text-muted-foreground">
+        Metadata sitasi hanya diterima dari keempat sumber di atas atau dari PDF yang Anda
+        unggah sendiri. Recens tidak pernah menyusun entri pustaka dari ingatan model.
+      </p>
+    </div>
+  );
+}
+
+const SUMBER = [
+  {
+    nama: "Crossref",
+    isi: "Rujukan resmi DOI. Paling lengkap untuk jurnal internasional bereputasi.",
+  },
+  {
+    nama: "OpenAlex",
+    isi: "Katalog terbuka lintas bidang, termasuk terbitan yang belum ber-DOI.",
+  },
+  {
+    nama: "Semantic Scholar",
+    isi: "Kuat pada ilmu komputer, kedokteran, dan bidang yang cepat berubah.",
+  },
+  {
+    nama: "Garuda / SINTA",
+    isi: "Jurnal nasional terakreditasi — yang paling sering diminta pembimbing.",
+  },
+] as const;
 
 function LibraryPanel({
   library,
