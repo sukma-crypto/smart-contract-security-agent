@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from recens import db
-from recens.core.llm import router
+from recens.core.llm import quality, router
 from recens.core.llm.base import Completion, LLMUnavailable
 from recens.core.llm.catalog import MODELS, RANTAI, TASKS, Tier, task_for, truncate_to_tokens
 
@@ -284,3 +284,164 @@ class TestEndpointPemakaian:
         assert set(data["providers"]) == {"deepseek", "openai", "anthropic"}
         assert set(data["tiers"]) == {"ringan", "sedang", "berat"}
         assert data["budget"]["harian_usd"] >= 0
+
+
+class TestLantaiMutu:
+    """Yang membuat "murah" dan "bagus" berhenti bertentangan.
+
+    Tanpa pemeriksa, penjenjangan biaya adalah taruhan: model murah dipakai
+    karena hemat, dan tidak ada yang tahu hasilnya layak sampai pembimbing
+    yang menemukannya.
+    """
+
+    @pytest.mark.parametrize(
+        "teks, kode",
+        [
+            ("", "kosong"),
+            ("Tentu, berikut adalah parafrase yang Anda minta untuk naskah ini.", "basa_basi"),
+            (
+                "Motivasi kerja berpengaruh positif terhadap kinerja karyawan pada perusahaan "
+                "yang diteliti, dan hal ini sejalan dengan sejumlah penelitian terdahulu yang "
+                "menunjukkan bahwa dorongan internal maupun eksternal sama-sama berperan dalam",
+                "terpotong",
+            ),
+            (
+                "The results show that work motivation has a positive and significant effect "
+                "on employee performance in the company that was studied by the researcher.",
+                "bahasa_keliru",
+            ),
+            ("Hasil penelitian menunjukkan bahwa motivasi berpengaruh. " * 5, "pengulangan"),
+        ],
+    )
+    def test_cacat_yang_bisa_dibuktikan_salah_ditolak(self, teks, kode):
+        laporan = quality.inspect(teks, quality.Spec())
+        assert kode in laporan.codes
+        assert laporan.ok is False
+
+    def test_naskah_wajar_lolos(self):
+        teks = (
+            "Motivasi kerja berpengaruh positif dan signifikan terhadap kinerja karyawan. "
+            "Temuan ini sejalan dengan penelitian terdahulu yang menunjukkan hubungan serupa "
+            "pada konteks organisasi yang berbeda."
+        )
+        assert quality.inspect(teks, quality.Spec()).ok is True
+
+    def test_istilah_teknis_inggris_bukan_tanda_salah_bahasa(self):
+        """Naskah Indonesia lazim mempertahankan istilah teknis apa adanya.
+
+        Menandainya sebagai salah bahasa akan memicu naik tingkat pada tulisan
+        yang justru benar — dan penolakan palsu yang sering terjadi adalah cara
+        tercepat membuat pemeriksanya dimatikan orang.
+        """
+        teks = (
+            "Nilai outer loading dan composite reliability pada tabel di atas menunjukkan "
+            "bahwa seluruh indikator memenuhi convergent validity yang disyaratkan dalam "
+            "analisis structural equation modeling."
+        )
+        assert "bahasa_keliru" not in quality.inspect(teks, quality.Spec()).codes
+
+    def test_sitasi_di_luar_pustaka_ditolak(self):
+        teks = "Motivasi memengaruhi kinerja [[cite:hantu2020]] menurut kajian terdahulu."
+        laporan = quality.inspect(teks, quality.Spec(citekeys={"nyata2021"}))
+        assert "sitasi_karangan" in laporan.codes
+
+    def test_markah_markdown_hanya_dicatat_tidak_memicu_naik_tingkat(self):
+        """Cacat ringan tidak layak dibayar dengan model yang lebih mahal."""
+        teks = "**Motivasi kerja** berpengaruh positif terhadap kinerja karyawan yang diteliti."
+        laporan = quality.inspect(teks, quality.Spec())
+        assert "markah_markdown" in laporan.codes
+        assert laporan.ok is True
+
+
+class TestNaikTingkatKarenaMutu:
+    def _penyedia_cacat(self, monkeypatch, cacat_pada: set[str]):
+        """Penyedia yang keluarannya cacat hanya pada model tertentu."""
+
+        class Bervariasi(PenyediaPalsu):
+            def complete(self, system, user, model_id="", max_tokens=1024, temperature=0.3):
+                hasil = super().complete(system, user, model_id, max_tokens, temperature)
+                if model_id in cacat_pada:
+                    hasil.text = "Tentu, berikut adalah jawaban yang Anda minta untuk naskah."
+                else:
+                    hasil.text = (
+                        "Motivasi kerja berpengaruh positif dan signifikan terhadap kinerja "
+                        "karyawan pada perusahaan yang diteliti dalam penelitian ini."
+                    )
+                return hasil
+
+        peta = {
+            "deepseek": Bervariasi("deepseek"),
+            "openai": Bervariasi("openai"),
+            "anthropic": Bervariasi("anthropic"),
+        }
+        monkeypatch.setattr(router, "get_providers", lambda *a, **k: peta)
+        return peta
+
+    def test_keluaran_cacat_memicu_satu_kenaikan(self, monkeypatch, conn):
+        from recens.core.llm import services
+
+        peta = self._penyedia_cacat(monkeypatch, {"deepseek-chat"})
+        akun = db.insert(
+            conn, "accounts", email="mutu@b.ac.id", display_name="M", plan="coba",
+            credits=100, created_at=db.now(),
+        )
+        hasil = services._call(
+            "parafrase", "sistem", "isi", billing=router.Billing(conn=conn, account_id=akun)
+        )
+
+        assert hasil.escalated is True
+        assert "Motivasi kerja berpengaruh" in hasil.text
+        # Jenjang murah dicoba lebih dulu, lalu naik — bukan langsung mahal.
+        assert peta["deepseek"].panggilan and peta["openai"].panggilan
+
+        baris = db.fetch_all(conn, "SELECT * FROM llm_calls ORDER BY id")
+        assert baris[0]["outcome"] == "mutu_ditolak"
+        assert "basa_basi" in baris[0]["detail"]
+        assert baris[1]["outcome"] == "naik_tingkat"
+
+    def test_keluaran_bagus_tidak_pernah_naik(self, monkeypatch, conn):
+        from recens.core.llm import services
+
+        peta = self._penyedia_cacat(monkeypatch, set())
+        akun = db.insert(
+            conn, "accounts", email="hemat@b.ac.id", display_name="H", plan="coba",
+            credits=100, created_at=db.now(),
+        )
+        hasil = services._call(
+            "parafrase", "sistem", "isi", billing=router.Billing(conn=conn, account_id=akun)
+        )
+        assert hasil.escalated is False
+        assert peta["openai"].panggilan == []
+        assert peta["anthropic"].panggilan == []
+
+    def test_cacat_di_kedua_jenjang_berhenti_setelah_sekali_naik(self, monkeypatch, conn):
+        """Satu kenaikan sudah membuktikan masalahnya bukan kekuatan model."""
+        from recens.core.llm import services
+
+        peta = self._penyedia_cacat(monkeypatch, {"deepseek-chat", "gpt-4.1-mini"})
+        akun = db.insert(
+            conn, "accounts", email="gagal@b.ac.id", display_name="G", plan="coba",
+            credits=100, created_at=db.now(),
+        )
+        services._call(
+            "parafrase", "sistem", "isi", billing=router.Billing(conn=conn, account_id=akun)
+        )
+        # Dua panggilan saja: yang murah dan satu kenaikan. Tidak lebih.
+        assert db.fetch_one(conn, "SELECT COUNT(*) AS n FROM llm_calls")["n"] == 2
+
+    def test_laporan_mutu_menunjuk_tugas_yang_salah_ditempatkan(self, monkeypatch, conn):
+        from recens.core.llm import services
+
+        self._penyedia_cacat(monkeypatch, {"deepseek-chat"})
+        akun = db.insert(
+            conn, "accounts", email="lapor@b.ac.id", display_name="L", plan="coba",
+            credits=100, created_at=db.now(),
+        )
+        billing = router.Billing(conn=conn, account_id=akun)
+        for _ in range(3):
+            services._call("parafrase", "sistem", "isi", billing=billing)
+
+        laporan = router.quality_report(conn, akun)
+        ditolak = next(r for r in laporan if r["model"] == "deepseek-chat")
+        assert ditolak["ditolak"] == 3
+        assert ditolak["angka_penolakan"] == 1.0

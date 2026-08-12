@@ -23,7 +23,8 @@ from . import prompts
 from .base import LLMUnavailable
 from .guardrails import GuardrailError, Verdict, guard_output, guard_request, word_budget
 from .providers import get_provider
-from .router import Billing, BudgetExceeded, route
+from . import quality
+from .router import Billing, BudgetExceeded, mark_quality, route
 
 
 @dataclass
@@ -42,25 +43,72 @@ class ServiceResult:
         }
 
 
-def _call(task: str, system: str, user: str, temperature=0.3, billing: Billing | None = None):
-    """Satu-satunya jalan menuju model.
+def _call(
+    task: str,
+    system: str,
+    user: str,
+    temperature=0.3,
+    billing: Billing | None = None,
+    mutu: quality.Spec | None = None,
+):
+    """Satu-satunya jalan menuju model, lengkap dengan lantai mutunya.
+
+    Urutannya disengaja: **coba yang murah dulu, naikkan hanya bila terbukti
+    gagal.** Kebalikannya — memakai model mahal untuk semua demi berjaga-jaga —
+    membayar penuh untuk pekerjaan yang model murah sudah sanggup, dan itu
+    justru pemborosan yang paling sering tidak disadari karena hasilnya memang
+    bagus.
+
+    Yang menentukan "gagal" bukan perasaan melainkan pemeriksaan deterministik:
+    kalimat terputus, jawaban berpindah bahasa, sitasi yang tidak ada di
+    pustaka, keluaran yang merosot jadi pengulangan. Menilai mutu dengan model
+    lain hanya memindahkan pertanyaannya satu lapis ke dalam, dengan biaya
+    tambahan dan tanpa jaminan tambahan.
 
     Batas keluaran tidak lagi datang dari pemanggil melainkan dari katalog
-    tugas. Sebelumnya tiap tempat memilih ``max_tokens`` sendiri, dan angka yang
-    dipilih di satu tempat tidak pernah ditinjau ulang dari tempat lain —
-    sehingga pagar belanja tersebar di dua belas keputusan yang tidak saling
-    tahu. Sekarang pagar itu satu daftar yang bisa dibaca sekali duduk.
+    tugas. Sebelumnya dua belas tempat memilih ``max_tokens`` sendiri, dan
+    angka yang dipilih di satu tempat tidak pernah ditinjau dari tempat lain.
 
     Pagar anggaran yang tersentuh dijadikan ``LLMUnavailable`` supaya seluruh
     pemanggil menanganinya lewat jalur yang sudah ada: turun ke jalur
     deterministik, bukan gagal ke muka pengguna. Kehabisan anggaran bukan
     kerusakan; ia keadaan yang memang direncanakan.
     """
+    spec = mutu or quality.spec_for(task)
     try:
-        hasil = route(task, system, user, temperature=temperature, billing=billing)
+        pertama = route(task, system, user, temperature=temperature, billing=billing)
     except BudgetExceeded as exc:
         raise LLMUnavailable(str(exc)) from exc
-    return hasil.completion
+
+    laporan = quality.inspect(pertama.completion.text, spec)
+    if laporan.ok:
+        return pertama.completion
+
+    conn = billing.conn if billing else None
+    mark_quality(conn, pertama.call_id, laporan.codes)
+
+    try:
+        kedua = route(
+            task, system, user, temperature=temperature, billing=billing, escalated=True
+        )
+    except (LLMUnavailable, BudgetExceeded):
+        # Hasil yang cacat tetap lebih berguna daripada tidak ada apa-apa;
+        # pemanggil masih punya jalur deterministiknya sendiri bila ia menilai
+        # hasil ini tidak layak.
+        return pertama.completion
+
+    laporan_kedua = quality.inspect(kedua.completion.text, spec)
+    kedua.completion.escalated = True
+    if laporan_kedua.ok:
+        return kedua.completion
+
+    mark_quality(conn, kedua.call_id, laporan_kedua.codes)
+    # Dua-duanya cacat: kembalikan yang cacatnya paling sedikit, dan jangan
+    # naik lagi. Satu kali kenaikan sudah membuktikan bahwa masalahnya bukan
+    # pada kekuatan modelnya.
+    if len(laporan_kedua.issues) < len(laporan.issues):
+        return kedua.completion
+    return pertama.completion
 
 
 # --- Penulisan & bahasa ------------------------------------------------------
@@ -509,7 +557,11 @@ def narrative_for_analysis(result: AnalysisResult, context: str = "", billing: B
     # Sekali saja, dan hanya karena penolakannya berarti sesuatu: angkanya
     # diperiksa mesin, bukan dinilai perasaan. Tanpa batas itu, satu hasil
     # analisis yang aneh bisa memanggil model termahal berkali-kali.
-    if not verdict.allowed:
+    # Hanya bila ``_call`` belum menaikkannya sendiri. Tanpa syarat ini,
+    # keluaran yang gagal lantai mutu *dan* gagal penelusuran angka akan
+    # memanggil model termahal dua kali untuk satu permintaan — biaya berlipat
+    # justru pada kasus yang paling sering gagal.
+    if not verdict.allowed and not completion.escalated:
         try:
             naik = route(
                 "narasi_hasil", system, user, billing=billing, escalated=True

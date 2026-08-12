@@ -82,6 +82,10 @@ class RouteResult:
     #: Jenjang yang benar-benar dipakai bila berbeda dari jenjang bawaan tugas.
     escalated: bool = False
     attempts: list[str] = field(default_factory=list)
+    #: Baris jejak panggilan ini, supaya hasil pemeriksaan mutu bisa
+    #: ditempelkan padanya alih-alih menambah baris baru yang membuat
+    #: jumlah panggilan terhitung dua kali.
+    call_id: int | None = None
 
 
 # --- Catatan pengeluaran -----------------------------------------------------
@@ -293,8 +297,9 @@ def route(
         completion.cost_micros = model.cost_micros(
             completion.input_tokens, completion.output_tokens
         )
+        call_id = None
         if conn is not None:
-            record_call(
+            call_id = record_call(
                 conn,
                 account_id=account_id,
                 project_id=project_id,
@@ -307,12 +312,73 @@ def route(
                 outcome="naik_tingkat" if escalated else "berhasil",
             )
         return RouteResult(
-            completion=completion, model=model, task=task, escalated=escalated, attempts=dicoba
+            completion=completion,
+            model=model,
+            task=task,
+            escalated=escalated,
+            attempts=dicoba,
+            call_id=call_id,
         )
 
     raise LLMUnavailable(
         "Seluruh model untuk tugas ini gagal dipanggil. " + " | ".join(kegagalan)
     )
+
+
+def mark_quality(
+    conn: sqlite3.Connection | None, call_id: int | None, codes: list[str]
+) -> None:
+    """Tandai panggilan yang hasilnya tidak lolos lantai mutu.
+
+    Ditempelkan pada baris panggilannya sendiri, bukan sebagai baris baru:
+    panggilan yang ditolak tetap satu panggilan, dan menghitungnya dua kali
+    akan membuat laporan biaya per tugas berbohong.
+    """
+    if conn is None or call_id is None or not codes:
+        return
+    conn.execute(
+        "UPDATE llm_calls SET outcome = ?, detail = ? WHERE id = ?",
+        ("mutu_ditolak", ", ".join(codes)[:500], call_id),
+    )
+    conn.commit()
+
+
+def quality_report(conn: sqlite3.Connection, account_id: int | None = None) -> list[dict]:
+    """Angka penolakan mutu per tugas dan model.
+
+    Inilah yang membuat penjenjangan bisa disetel dari bukti alih-alih tebakan:
+    tugas yang sering ditolak di jenjang murah adalah tugas yang salah
+    ditempatkan, dan itu terlihat di sini sebelum ada yang mengeluh.
+    """
+    sql = (
+        "SELECT task, provider, model, COUNT(*) AS panggilan, "
+        "SUM(CASE WHEN outcome = 'mutu_ditolak' THEN 1 ELSE 0 END) AS ditolak, "
+        "SUM(CASE WHEN outcome = 'naik_tingkat' THEN 1 ELSE 0 END) AS naik, "
+        "COALESCE(SUM(cost_micros), 0) AS biaya "
+        "FROM llm_calls"
+    )
+    args: tuple = ()
+    if account_id is not None:
+        sql += " WHERE account_id = ?"
+        args = (account_id,)
+    sql += " GROUP BY task, provider, model ORDER BY ditolak DESC, biaya DESC"
+
+    baris = []
+    for row in db.fetch_all(conn, sql, args):
+        panggilan = row["panggilan"] or 1
+        baris.append(
+            {
+                "task": row["task"],
+                "provider": row["provider"],
+                "model": row["model"],
+                "panggilan": row["panggilan"],
+                "ditolak": row["ditolak"],
+                "naik_tingkat": row["naik"],
+                "angka_penolakan": round(row["ditolak"] / panggilan, 3),
+                "biaya_usd": round(row["biaya"] / 1_000_000, 4),
+            }
+        )
+    return baris
 
 
 def usage_summary(conn: sqlite3.Connection, account_id: int | None) -> dict:

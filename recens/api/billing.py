@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from ..core import credits
 from ..core.llm.catalog import MODELS, RANTAI, TASKS, Tier
-from ..core.llm.router import candidates_for, usage_summary
+from ..core.llm.router import candidates_for, quality_report, usage_summary
 from .deps import current_account, get_conn
 
 router = APIRouter(tags=["langganan"])
@@ -116,6 +116,31 @@ def account_usage(
     pemakaian adalah catatan siapa mengerjakan apa dan kapan.
     """
     return usage_summary(conn, account["id"])
+
+
+@router.get("/account/quality")
+def account_quality(
+    conn: sqlite3.Connection = Depends(get_conn),
+    account: dict = Depends(current_account),
+) -> dict:
+    """Angka penolakan mutu per tugas dan model.
+
+    Inilah yang membuat penjenjangan bisa disetel dari bukti alih-alih tebakan.
+    Tugas dengan angka penolakan tinggi di jenjang murah adalah tugas yang
+    salah ditempatkan — dan itu terlihat di sini sebelum ada yang mengeluh,
+    bukan sesudah.
+    """
+    baris = quality_report(conn, account["id"])
+    perlu_ditinjau = [r for r in baris if r["panggilan"] >= 5 and r["angka_penolakan"] > 0.2]
+    return {
+        "rincian": baris,
+        "perlu_ditinjau": perlu_ditinjau,
+        "catatan": (
+            "Keluaran diperiksa dengan aturan yang bisa dibuktikan salah — kalimat "
+            "terputus, jawaban berpindah bahasa, sitasi di luar pustaka, keluaran yang "
+            "merosot jadi pengulangan. Yang tidak lolos dinaikkan satu tingkat, sekali."
+        ),
+    }
 
 
 @router.get("/models")

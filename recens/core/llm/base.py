@@ -21,6 +21,9 @@ class Completion:
     cost_micros: int = 0
     #: Benar bila masukannya dipotong agar muat anggaran token.
     truncated: bool = False
+    #: Benar bila hasil ini datang dari jenjang yang dinaikkan karena yang
+    #: murah tidak lolos lantai mutu.
+    escalated: bool = False
 
     @property
     def total_tokens(self) -> int:
