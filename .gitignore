@@ -1,0 +1,9 @@
+# Data runtime: basis data, unggahan, dan hasil ekspor milik pengguna.
+# Tidak pernah masuk repositori.
+recens_data/
+*.db
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+node_modules/
