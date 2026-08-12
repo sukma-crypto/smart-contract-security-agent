@@ -7,6 +7,7 @@ import { SimpleSelect } from "@/components/ui/form";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { BookStack } from "@/landing/illustrations";
+import { QuoteRotator } from "@/components/ui/quote";
 import { useActions, useApp } from "@/lib/store";
 
 import { ProjectView } from "@/views/ProjectView";
@@ -404,6 +405,10 @@ function EmptyState() {
       <Button className="mt-6" onClick={() => setView("buat_proyek")}>
         Buat proyek
       </Button>
+
+      <div className="mt-16 border-t border-border pt-10">
+        <QuoteRotator tema="waktu" />
+      </div>
     </div>
   );
 }

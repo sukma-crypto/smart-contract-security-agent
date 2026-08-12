@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { useActions, useApp } from "@/lib/store";
 import { cn, num } from "@/lib/utils";
 import type { OutlineRow } from "@/lib/types";
+import { QuoteRotator } from "@/components/ui/quote";
 import { PageHeader } from "@/views/shared";
 
 interface Dashboard {
@@ -97,6 +98,12 @@ export function DashboardView() {
           )}
         </CardContent>
       </Card>
+
+      {/* Ruang di bawah dashboard memang kosong dan akan tetap kosong — isinya
+          bergantung pada panjang naskah. Diisi kutipan, bukan dibiarkan
+          menganga: halaman ini paling sering dibuka orang yang sedang menakar
+          sisa pekerjaannya, dan itu saat yang tepat untuk sedikit dorongan. */}
+      <QuoteRotator tema="ketekunan" className="mt-14 pb-6" />
     </>
   );
 }

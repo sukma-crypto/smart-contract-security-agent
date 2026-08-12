@@ -3,6 +3,7 @@ import { Check, Plus, Quote, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge, Callout, DataTable, Finding } from "@/components/ui/display";
+import { QuoteRotator } from "@/components/ui/quote";
 import { SimpleSelect } from "@/components/ui/form";
 import { api } from "@/lib/api";
 import { flattenSections, useActions, useApp } from "@/lib/store";
@@ -137,12 +138,18 @@ export function EditorView() {
 
           <div className="measure">
           {!active?.blocks.length ? (
-            <button
-              onClick={() => addBlock("paragraph")}
-              className="w-full rounded-md border border-dashed border-border py-10 text-center text-[12.5px] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
-            >
-              Bagian ini masih kosong — klik untuk mulai menulis.
-            </button>
+            <>
+              <button
+                onClick={() => addBlock("paragraph")}
+                className="w-full rounded-md border border-dashed border-border py-10 text-center text-[12.5px] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
+              >
+                Bagian ini masih kosong — klik untuk mulai menulis.
+              </button>
+              {/* Hanya saat bagiannya benar-benar kosong. Begitu ada satu
+                  paragraf, kutipannya hilang: yang berkedip di sebelah naskah
+                  yang sedang diketik bukan motivasi, melainkan gangguan. */}
+              <QuoteRotator tema="menulis" className="mt-12 pb-4" />
+            </>
           ) : (
             <>
               {active.blocks.map((block) => (
