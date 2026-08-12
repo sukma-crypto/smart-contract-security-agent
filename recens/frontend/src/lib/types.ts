@@ -7,7 +7,16 @@ export interface StepInfo {
   summary: string;
   mode: string;
   active: boolean;
+  /** Termasuk yang ingin dikerjakan pengguna. Tidak pernah mengunci apa pun. */
+  focused: boolean;
   note: string | null;
+}
+
+export interface FocusPreset {
+  key: string;
+  label: string;
+  summary: string;
+  steps: string[];
 }
 
 export interface WorkTypeCatalog {
@@ -30,6 +39,7 @@ export interface Catalog {
   work_types: WorkTypeCatalog[];
   research_types: { key: string; label: string; needs: string }[];
   steps: { number: number; key: string; title: string; summary: string }[];
+  focus_presets: FocusPreset[];
   treatment: Record<string, Record<string, string>>;
   plans: Plan[];
   product_limits: { does: string; does_not: string; rule: string }[];
@@ -61,6 +71,9 @@ export interface Project {
   deadline: string | null;
   citation_style: string;
   steps: StepInfo[];
+  focus: string[];
+  focus_key: string;
+  focus_label: string;
   treatment: Record<string, string>;
   work_type_detail: {
     family: string;

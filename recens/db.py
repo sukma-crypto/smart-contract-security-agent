@@ -54,6 +54,10 @@ CREATE TABLE IF NOT EXISTS projects (
     target_words   INTEGER NOT NULL DEFAULT 0,
     deadline       TEXT,
     citation_style TEXT NOT NULL DEFAULT 'apa',
+    -- Langkah yang benar-benar ingin dikerjakan pengguna. NULL berarti seluruh
+    -- langkah; itulah bawaan, dan itu pula arti proyek yang dibuat sebelum
+    -- kolom ini ada.
+    focus_json     TEXT,
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL
 );
@@ -252,6 +256,7 @@ def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
 #: yang menuntut penulisan ulang data, pasang Alembic.
 _ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "accounts": {"password_hash": "TEXT"},
+    "projects": {"focus_json": "TEXT"},
 }
 
 

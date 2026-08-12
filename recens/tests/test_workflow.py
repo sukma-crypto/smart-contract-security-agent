@@ -7,7 +7,18 @@ import zipfile
 import pytest
 
 from recens.core.credits import PLANS
-from recens.core.worktypes import WORK_TYPES, Family, ResearchType, applicable_steps, get_work_type
+from recens.core.worktypes import (
+    ALL_STEP_KEYS,
+    FOCUS_PRESETS,
+    WORK_TYPES,
+    Family,
+    ResearchType,
+    applicable_steps,
+    focus_key,
+    focus_label,
+    get_work_type,
+    normalize_focus,
+)
 
 from .conftest import CROSSREF_ENTRY
 
@@ -403,3 +414,114 @@ class TestKelengkapanTerhadapRancangan:
         assert response.json()["size_bytes"] > 0
         unduh = client.get(f"/api/projects/{project['id']}/export/download?format=latex")
         assert unduh.status_code == 200
+
+
+class TestFokusKerja:
+    """Delapan langkah adalah peta, bukan rel.
+
+    Yang diuji di sini bukan sekadar penyaringan tampilan, melainkan janji
+    yang menyertainya: fokus tidak boleh mengunci apa pun. Begitu ia mulai
+    mematikan langkah, mahasiswa yang berubah pikiran di tengah jalan akan
+    menabrak pintu terkunci karena pilihan yang ia buat sebulan sebelumnya.
+    """
+
+    def test_kosong_berarti_seluruh_langkah(self):
+        assert normalize_focus(None) == ALL_STEP_KEYS
+        assert normalize_focus([]) == ALL_STEP_KEYS
+        assert normalize_focus(["kunci_yang_tidak_ada"]) == ALL_STEP_KEYS
+
+    def test_preset_boleh_disebut_namanya(self):
+        assert normalize_focus("olah_data") == normalize_focus(
+            ["olah_data", "menulis", "periksa_naskah", "ekspor_revisi"]
+        )
+        assert focus_key("olah_data") == "olah_data"
+        assert focus_label("olah_data") == "Olah data & BAB IV"
+
+    def test_daftar_langkah_diambil_apa_adanya(self):
+        """Daftar tidak dimekarkan menjadi preset.
+
+        Bedanya penting: nama preset adalah pilihan siap pakai, sedangkan
+        daftar adalah pilihan yang dirakit sendiri pengguna. Memekarkan daftar
+        menjadi preset terdekat akan diam-diam menambahkan langkah yang justru
+        sengaja tidak ia pilih.
+        """
+        assert normalize_focus(["olah_data"]) == ("buat_proyek", "olah_data")
+
+    def test_buat_proyek_selalu_ikut(self):
+        for preset in FOCUS_PRESETS:
+            assert "buat_proyek" in normalize_focus(preset.steps)
+
+    def test_urutan_mengikuti_urutan_langkah(self):
+        acak = ["ekspor_revisi", "olah_data", "menulis"]
+        hasil = normalize_focus(acak)
+        assert list(hasil) == [k for k in ALL_STEP_KEYS if k in set(hasil)]
+
+    def test_fokus_tidak_mematikan_langkah_apa_pun(self):
+        work_type = get_work_type("tugas_akhir")
+        steps = applicable_steps(work_type, ResearchType.KUANTITATIF_ASOSIATIF, focus="olah_data")
+        terfokus = [s for s in steps if s["focused"]]
+        di_luar = [s for s in steps if not s["focused"]]
+
+        assert {s["key"] for s in terfokus} == set(normalize_focus("olah_data"))
+        assert di_luar, "fokus sempit harus menyisakan langkah di luar fokus"
+        # Inilah jaminannya: yang di luar fokus tetap aktif, hanya tidak menonjol.
+        assert all(s["active"] for s in di_luar)
+
+    def test_fokus_lengkap_tidak_menyisakan_apa_pun_di_luar(self):
+        work_type = get_work_type("tugas_akhir")
+        steps = applicable_steps(work_type, ResearchType.KUANTITATIF_ASOSIATIF, focus=None)
+        assert all(s["focused"] for s in steps)
+
+
+class TestFokusPadaProyek:
+    def test_proyek_baru_menyimpan_fokusnya(self, client):
+        created = client.post(
+            "/api/projects",
+            json={"name": "Analisis Bab IV", "work_type": "tugas_akhir",
+                  "research_type": "kuantitatif_asosiatif", "focus": "olah_data"},
+        ).json()
+        assert created["focus_key"] == "olah_data"
+        assert "olah_data" in created["focus"]
+        assert "susun_outline" not in created["focus"]
+
+    def test_fokus_bisa_diubah_kemudian(self, client, project):
+        ubah = client.patch(f"/api/projects/{project['id']}", json={"focus": "kajian_pustaka"})
+        assert ubah.status_code == 200
+        assert ubah.json()["focus_key"] == "kajian_pustaka"
+
+        kembali = client.patch(f"/api/projects/{project['id']}", json={"focus": []})
+        assert kembali.json()["focus_key"] == "lengkap"
+
+    def test_proyek_lama_tanpa_kolom_fokus_terbaca_lengkap(self, client, project):
+        detail = client.get(f"/api/projects/{project['id']}").json()
+        assert detail["focus_key"] == "lengkap"
+
+    def test_dashboard_hanya_mengukur_yang_difokuskan(self, client, project):
+        client.patch(f"/api/projects/{project['id']}", json={"focus": "olah_data"})
+        data = client.get(f"/api/projects/{project['id']}/dashboard").json()
+
+        assert data["focus_key"] == "olah_data"
+        # Menulis tetap dipakai — narasi hasil ditulis di editor — tetapi target
+        # kata seluruh naskah bukan ukuran orang yang hanya menggarap BAB IV.
+        assert data["writing_in_focus"] is True
+        assert data["tracks_word_target"] is False
+        langkah = {item["step"] for item in data["work_done"]}
+        assert "olah_data" in langkah
+        # Referensi bukan urusan orang yang datang hanya untuk mengolah data.
+        assert "kumpulkan_referensi" not in langkah
+
+    def test_dashboard_tanpa_menulis_tidak_menuntut_jumlah_kata(self, client, project):
+        client.patch(f"/api/projects/{project['id']}", json={"focus": "perapian"})
+        data = client.get(f"/api/projects/{project['id']}/dashboard").json()
+        assert data["writing_in_focus"] is False
+        assert data["tracks_word_target"] is False
+
+    def test_fokus_lengkap_tetap_mengukur_target_kata(self, client, project):
+        data = client.get(f"/api/projects/{project['id']}/dashboard").json()
+        assert data["tracks_word_target"] is True
+        assert data["target_words"] > 0
+
+    def test_katalog_menawarkan_preset(self, client):
+        katalog = client.get("/api/catalog").json()
+        kunci = {p["key"] for p in katalog["focus_presets"]}
+        assert {"lengkap", "olah_data", "kajian_pustaka"} <= kunci

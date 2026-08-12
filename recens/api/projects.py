@@ -19,6 +19,7 @@ from ..core.manuscript import (
     snapshot,
 )
 from ..core.worktypes import (
+    FOCUS_PRESETS,
     RESEARCH_NEEDS,
     RESEARCH_TYPE_LABELS,
     STEPS,
@@ -26,7 +27,10 @@ from ..core.worktypes import (
     WORK_TYPES,
     ResearchType,
     applicable_steps,
+    focus_key,
+    focus_label,
     get_work_type,
+    normalize_focus,
     requires_data_step,
 )
 from .deps import (
@@ -52,6 +56,8 @@ class ProjectCreate(BaseModel):
     target_words: int | None = None
     deadline: str | None = None
     citation_style: str | None = None
+    #: Nama preset ("olah_data") atau daftar kunci langkah. Kosong = seluruhnya.
+    focus: list[str] | str | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -61,6 +67,7 @@ class ProjectUpdate(BaseModel):
     target_words: int | None = None
     deadline: str | None = None
     citation_style: str | None = None
+    focus: list[str] | str | None = None
 
 
 class SectionCreate(BaseModel):
@@ -135,6 +142,15 @@ def catalog() -> dict:
             {"number": s.number, "key": s.key, "title": s.title, "summary": s.summary}
             for s in STEPS
         ],
+        "focus_presets": [
+            {
+                "key": f.key,
+                "label": f.label,
+                "summary": f.summary,
+                "steps": list(f.steps),
+            }
+            for f in FOCUS_PRESETS
+        ],
         "treatment": {family.value: values for family, values in TREATMENT.items()},
         "plans": [plan.to_dict() for plan in credits.PLANS.values()],
         "product_limits": describe_limits(),
@@ -183,6 +199,7 @@ def create_project(
         target_words=target,
         deadline=payload.deadline,
         citation_style=payload.citation_style or work_type.citation_style,
+        focus_json=json.dumps(list(normalize_focus(payload.focus)), ensure_ascii=False),
         created_at=db.now(),
         updated_at=db.now(),
     )
@@ -228,6 +245,22 @@ def get_project_detail(
     return _project_detail(conn, project)
 
 
+def project_focus(project: dict) -> tuple[str, ...]:
+    """Langkah yang sedang difokuskan proyek ini.
+
+    Kolomnya boleh kosong — proyek yang dibuat sebelum fokus ada, dan proyek
+    yang memang ingin memakai seluruh langkah, sama-sama menyimpan NULL.
+    """
+    raw = project.get("focus_json")
+    if not raw:
+        return normalize_focus(None)
+    try:
+        stored = json.loads(raw)
+    except (TypeError, ValueError):
+        return normalize_focus(None)
+    return normalize_focus(stored if isinstance(stored, list) else None)
+
+
 def _project_detail(conn: sqlite3.Connection, project: dict) -> dict:
     """Rincian proyek beserta hitungan turunannya.
 
@@ -239,6 +272,7 @@ def _project_detail(conn: sqlite3.Connection, project: dict) -> dict:
     work_type = get_work_type(project["work_type"])
     research_type = ResearchType(project["research_type"])
     manuscript = load_manuscript(conn, project_id)
+    focus = project_focus(project)
 
     counts = {
         "references": db.fetch_one(
@@ -286,7 +320,10 @@ def _project_detail(conn: sqlite3.Connection, project: dict) -> dict:
             "research_type_label": RESEARCH_TYPE_LABELS[research_type],
             "research_needs": RESEARCH_NEEDS[research_type],
             "treatment": work_type.treatment,
-            "steps": applicable_steps(work_type, research_type),
+            "steps": applicable_steps(work_type, research_type, focus),
+            "focus": list(focus),
+            "focus_key": focus_key(focus),
+            "focus_label": focus_label(focus),
             "data_step_required": requires_data_step(work_type, research_type),
             "word_count": manuscript.word_count,
             "counts": counts,
@@ -303,6 +340,10 @@ def update_project(
     project: dict = Depends(get_project),
 ) -> dict:
     values = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
+    if "focus" in values:
+        values["focus_json"] = json.dumps(
+            list(normalize_focus(values.pop("focus"))), ensure_ascii=False
+        )
     if "research_type" in values:
         try:
             ResearchType(values["research_type"])
@@ -600,10 +641,23 @@ def dashboard(
     )
     target = project["target_words"] or manuscript.target_words
     remaining = max(target - manuscript.word_count, 0)
+    focus = project_focus(project)
 
     return {
         "project_id": project_id,
         "work_type": work_type.label,
+        "focus": list(focus),
+        "focus_key": focus_key(focus),
+        "focus_label": focus_label(focus),
+        # Menulis bukan bagian dari tiap pekerjaan. Bagi yang datang hanya untuk
+        # merapikan format, editor tidak pernah dibuka sama sekali.
+        "writing_in_focus": "menulis" in focus,
+        # Target kata seluruh naskah hanya berlaku bagi yang memang bertanggung
+        # jawab atas seluruh naskah, dan penandanya adalah menyusun kerangka:
+        # orang yang hanya menggarap BAB IV tetap menulis, tetapi 18.000 kata
+        # bukan ukurannya — melaporkan ia baru 3% selesai adalah kabar buruk
+        # tentang pekerjaan yang tidak pernah ia ambil.
+        "tracks_word_target": "menulis" in focus and "susun_outline" in focus,
         "word_count": manuscript.word_count,
         "target_words": target,
         "progress": round(manuscript.word_count / target, 3) if target else 0.0,
@@ -615,4 +669,95 @@ def dashboard(
         "chapters": [s for s in sections if s["level"] == 1],
         "sections": sections,
         "revisions": {row["status"]: row["n"] for row in open_revisions},
+        "work_done": _work_done(conn, project, focus, sections),
     }
+
+
+def _work_done(
+    conn: sqlite3.Connection,
+    project: dict,
+    focus: tuple[str, ...],
+    sections: list[dict],
+) -> list[dict]:
+    """Pekerjaan yang sudah benar-benar dikerjakan, disaring menurut fokus.
+
+    Jumlah kata adalah ukuran kemajuan yang buruk untuk sebagian besar
+    pekerjaan di sini, dan ukuran yang menyesatkan untuk seluruhnya: ia
+    memberi nilai pada volume, padahal Bagian 8.1 justru menolak menuliskan bab
+    utuh. Yang layak dihitung adalah pekerjaan yang punya wujud — uji yang
+    dijalankan, referensi yang terverifikasi, coretan pembimbing yang ditutup.
+    """
+    project_id = project["id"]
+
+    def hitung(sql: str, *args) -> int:
+        return int(db.fetch_one(conn, sql, (project_id, *args))["n"])
+
+    ruleset = hitung(
+        "SELECT COUNT(*) AS n FROM rulesets WHERE project_id = ? AND active = 1"
+    )
+    kandidat = [
+        {
+            "step": "muat_aturan",
+            "key": "ruleset",
+            "label": "Pedoman aktif",
+            "count": ruleset,
+            "hint": "Aturan struktur, margin, dan penomoran yang mengikat seluruh keluaran.",
+        },
+        {
+            "step": "kumpulkan_referensi",
+            "key": "references",
+            "label": "Referensi terverifikasi",
+            "count": hitung(
+                "SELECT COUNT(*) AS n FROM refs WHERE project_id = ? AND verified = 1"
+            ),
+            "total": hitung("SELECT COUNT(*) AS n FROM refs WHERE project_id = ?"),
+            "hint": "Hanya yang terlacak ke basis data resmi yang boleh masuk daftar pustaka.",
+        },
+        {
+            "step": "susun_outline",
+            "key": "sections",
+            "label": "Bagian tersusun",
+            "count": len(sections),
+            "hint": "Kerangka bagian dan sub-bagian beserta target katanya.",
+        },
+        {
+            "step": "menulis",
+            "key": "sections_written",
+            "label": "Bagian sudah terisi",
+            "count": sum(1 for s in sections if s.get("word_count")),
+            "total": len(sections),
+            "hint": "Bagian yang sudah memuat tulisan, bukan sekadar judul.",
+        },
+        {
+            "step": "olah_data",
+            "key": "analyses",
+            "label": "Analisis dijalankan",
+            "count": hitung("SELECT COUNT(*) AS n FROM analyses WHERE project_id = ?"),
+            "hint": "Tiap uji tersimpan lengkap dengan data, parameter, dan hasilnya.",
+        },
+        {
+            "step": "olah_data",
+            "key": "datasets",
+            "label": "Berkas data terbaca",
+            "count": hitung("SELECT COUNT(*) AS n FROM datasets WHERE project_id = ?"),
+            "hint": "SPSS, Excel, CSV, atau transkrip wawancara.",
+        },
+        {
+            "step": "ekspor_revisi",
+            "key": "revisions_done",
+            "label": "Revisi ditutup",
+            "count": hitung(
+                "SELECT COUNT(*) AS n FROM revisions WHERE project_id = ? AND status = 'selesai'"
+            ),
+            "total": hitung("SELECT COUNT(*) AS n FROM revisions WHERE project_id = ?"),
+            "hint": "Coretan pembimbing yang sudah ditindaklanjuti di naskah.",
+        },
+        {
+            "step": "ekspor_revisi",
+            "key": "versions",
+            "label": "Versi tersimpan",
+            "count": hitung("SELECT COUNT(*) AS n FROM versions WHERE project_id = ?"),
+            "hint": "Titik pulih naskah sebelum perubahan besar.",
+        },
+    ]
+    return [item for item in kandidat if item["step"] in focus]

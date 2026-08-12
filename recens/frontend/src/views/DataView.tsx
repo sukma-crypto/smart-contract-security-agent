@@ -820,9 +820,14 @@ function TrailPanel({
                 {(analysis.narrative ?? "").slice(0, 320)}…
               </p>
               <Row className="mt-2.5">
+                {/* Bawaannya bukan bagian pertama naskah. Bagian terdaun
+                    pertama sebuah skripsi adalah Latar Belakang, dan tabel
+                    regresi yang mendarat di sana terbaca seperti fitur yang
+                    rusak. Kosong berarti "carikan bagian hasilnya". */}
                 <SimpleSelect
                   className="w-64"
-                  value={targets[analysis.id] ?? String(leaves[0]?.id ?? "")}
+                  value={targets[analysis.id] ?? ""}
+                  placeholder="Bagian hasil (otomatis)"
                   onValueChange={(value) => setTargets({ ...targets, [analysis.id]: value })}
                   options={leaves.map((s) => ({
                     value: String(s.id),
@@ -834,10 +839,10 @@ function TrailPanel({
                   variant="outline"
                   onClick={() =>
                     run(async () => {
-                      const sectionId = Number(targets[analysis.id] ?? leaves[0]?.id);
+                      const chosen = targets[analysis.id];
                       const result = await api.post<{ inserted: number }>(
                         `/analyses/${analysis.id}/insert`,
-                        { section_id: sectionId },
+                        chosen ? { section_id: Number(chosen) } : {},
                       );
                       toast(`${result.inserted} blok disisipkan ke naskah.`);
                       await refreshProject();

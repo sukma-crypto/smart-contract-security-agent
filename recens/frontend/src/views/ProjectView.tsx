@@ -7,7 +7,7 @@ import { Badge, Callout, Empty, StatLine } from "@/components/ui/display";
 import { Field, Input, SimpleSelect } from "@/components/ui/form";
 import { api } from "@/lib/api";
 import { useActions, useApp } from "@/lib/store";
-import { num } from "@/lib/utils";
+import { cn, num } from "@/lib/utils";
 import type { Project } from "@/lib/types";
 import { PageHeader, Row, useBusy } from "@/views/shared";
 
@@ -21,8 +21,10 @@ export function ProjectView() {
   const [researchType, setResearchType] = React.useState(catalog!.research_types[0].key);
   const [field, setField] = React.useState("");
   const [deadline, setDeadline] = React.useState("");
+  const [focus, setFocus] = React.useState("lengkap");
 
   const selected = catalog!.work_types.find((w) => w.key === workType)!;
+  const presets = catalog!.focus_presets ?? [];
 
   const create = () =>
     withBusy("create", async () => {
@@ -37,6 +39,7 @@ export function ProjectView() {
           research_type: researchType,
           field_of_study: field || null,
           deadline: deadline || null,
+          focus,
         }),
       );
       if (!created) return;
@@ -44,7 +47,13 @@ export function ProjectView() {
       await openProject(created.id);
       setName("");
       toast("Proyek dibuat lengkap dengan kerangka bawaannya.");
-      setView("muat_aturan");
+      // Mendarat di langkah yang memang dituju orangnya. Melempar semua orang
+      // ke "Muat aturan" hanya benar bagi yang mengerjakan naskah utuh; bagi
+      // yang datang untuk BAB IV, itu satu layar yang harus dilewati dulu
+      // sebelum sampai ke pekerjaannya.
+      const preset = presets.find((p) => p.key === focus);
+      const first = preset?.steps[0];
+      setView(!first || first === "buat_proyek" ? "muat_aturan" : first);
     });
 
   return (
@@ -104,6 +113,50 @@ export function ProjectView() {
               Buat proyek
             </Button>
           </Row>
+
+          {/* Pertanyaan yang menentukan bentuk seluruh ruang kerja, jadi ia
+              ditanyakan di sini dan bukan disembunyikan di pengaturan. Tidak
+              ada pilihan yang mengunci apa pun — yang berubah hanya langkah
+              mana yang berdiri di depan. */}
+          {presets.length ? (
+            <div className="mt-5">
+              <p className="text-[12.5px] font-medium">Apa yang ingin Anda kerjakan?</p>
+              <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+                Menentukan langkah mana yang ditonjolkan. Seluruh langkah lain tetap
+                terbuka dan bisa dipakai kapan saja.
+              </p>
+              <div className="mt-2.5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {presets.map((preset) => {
+                  const active = focus === preset.key;
+                  return (
+                    <button
+                      key={preset.key}
+                      type="button"
+                      onClick={() => setFocus(preset.key)}
+                      className={cn(
+                        "rounded-lg border p-3 text-left transition-colors",
+                        active
+                          ? "border-lagoon/50 bg-lagoon/8"
+                          : "border-border hover:border-border-strong hover:bg-muted/50",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "block text-[12.5px] font-medium",
+                          active && "text-foreground",
+                        )}
+                      >
+                        {preset.label}
+                      </span>
+                      <span className="mt-1 block text-[11px] leading-snug text-muted-foreground">
+                        {preset.summary}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
 
           <Callout className="mt-3.5" title={selected.label}>
             <p>{selected.ciri_khas}</p>

@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/display";
 import { SimpleSelect } from "@/components/ui/form";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import type { StepInfo } from "@/lib/types";
 import { BookStack } from "@/landing/illustrations";
 import { QuoteRotator } from "@/components/ui/quote";
 import { useActions, useApp } from "@/lib/store";
@@ -166,13 +168,30 @@ export default function App({
     );
   }
 
-  const steps = project?.steps ?? catalog.steps.map((s) => ({ ...s, active: true, note: null }));
+  // Tanpa proyek terbuka, katalog dipakai sebagai daftar langkah generik:
+  // seluruhnya aktif dan seluruhnya terfokus, sehingga sidebar tetap utuh.
+  const steps: StepInfo[] =
+    project?.steps ??
+    catalog.steps.map((s) => ({ ...s, mode: "ya", active: true, focused: true, note: null }));
   const ViewComponent = VIEWS[view] ?? ProjectView;
   const needsProject = STEP_VIEWS.indexOf(view) > 0 || view === "dashboard";
   const llm = health?.language_model;
 
+  // Sidebar berubah bentuk mengikuti apa yang benar-benar dikerjakan orangnya.
+  // Yang di luar fokus tetap ada dan tetap bisa diklik — ia hanya turun ke
+  // kelompok kedua, supaya delapan langkah berhenti terbaca sebagai delapan
+  // tunggakan bagi orang yang datang hanya untuk satu di antaranya.
+  const inFocus = steps.filter((step) => step.focused !== false);
+  const outOfFocus = steps.filter((step) => step.focused === false);
+  const whole = outOfFocus.length === 0;
+
   const phase = phaseOf(view);
   const tint = TINT[phase.tint];
+  // Bilah kata di header memakai target seluruh naskah, jadi ia hanya berarti
+  // bagi yang memang menggarap seluruh naskah — penandanya menyusun kerangka.
+  const showWords =
+    project &&
+    ["menulis", "susun_outline"].every((key) => inFocus.some((step) => step.key === key));
   const progress = project?.target_words
     ? Math.min(100, Math.round((project.word_count / project.target_words) * 100))
     : 0;
@@ -194,7 +213,7 @@ export default function App({
 
         {/* Jumlah kata selalu terlihat. Yang membuat orang bertahan menulis
             berbulan-bulan adalah melihat angkanya bergerak. */}
-        {project ? (
+        {showWords ? (
           <div className="ml-4 hidden items-center gap-2.5 lg:flex">
             <div className="h-1.5 w-24 overflow-hidden rounded-full bg-border">
               <div
@@ -241,74 +260,56 @@ export default function App({
             Garisnya menyambungkan penanda satu ke penanda berikutnya, sehingga
             sidebar terbaca sebagai rute, bukan sebagai daftar menu. */}
         <nav className="scrollbar-slim relative flex shrink-0 gap-3 overflow-x-auto px-5 pb-3 md:w-[14.5rem] md:flex-col md:gap-0 md:overflow-y-auto md:px-4 md:pb-8">
-          {steps.map((step, index) => {
-            const current = view === step.key;
-            const complete = done[step.key];
-            const stepPhase = phaseOf(step.key);
-            const stepTint = TINT[stepPhase.tint];
-            const first = index === 0 || phaseOf(steps[index - 1].key).name !== stepPhase.name;
+          {project ? <FocusPicker /> : null}
 
-            return (
-              <React.Fragment key={step.key}>
-                {first ? (
-                  <p className="mt-4 hidden pl-[30px] text-[10px] font-medium uppercase tracking-[0.14em] text-faint first:mt-0 md:block">
-                    {stepPhase.name}
-                  </p>
-                ) : null}
-                <button
-                  onClick={() => setView(step.key)}
-                  className={cn(
-                    "group relative flex shrink-0 items-start gap-2.5 rounded-lg py-1.5 pl-2 pr-2.5 text-left transition-colors md:w-full",
-                    current
-                      ? cn(stepTint.soft, "text-foreground")
-                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                    step.active === false && "opacity-45",
-                  )}
-                >
-                  {/* Tulang punggung antar-penanda */}
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "absolute left-[15px] top-[26px] hidden h-[calc(100%-18px)] w-px md:block",
-                      complete ? stepTint.bg : "bg-border",
-                      index === steps.length - 1 && "hidden md:hidden",
-                    )}
-                  />
-                  <span
-                    className={cn(
-                      "tabular relative z-10 grid size-[18px] shrink-0 translate-y-px place-items-center rounded-full text-[9.5px] font-semibold ring-2 ring-background transition-all",
-                      current
-                        ? stepTint.solid
-                        : complete
-                          ? cn(stepTint.solid, "opacity-85")
-                          : "border border-border-strong bg-card text-faint",
-                    )}
-                  >
-                    {complete && !current ? (
-                      <Check className="size-2.5" strokeWidth={3} />
-                    ) : (
-                      step.number
-                    )}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span
-                      className={cn(
-                        "block whitespace-nowrap text-[12.5px] leading-snug md:whitespace-normal",
-                        current && "font-semibold",
-                      )}
-                    >
-                      {step.title}
-                    </span>
-                    {step.note && current ? (
-                      <span className="hidden text-[10.5px] leading-snug text-faint md:block">
-                        {step.note}
-                      </span>
-                    ) : null}
-                  </span>
-                </button>
-              </React.Fragment>
-            );
-          })}
+          {inFocus.map((step, index) => (
+            <StepLink
+              key={step.key}
+              step={step}
+              view={view}
+              done={Boolean(done[step.key])}
+              onOpen={setView}
+              /* Nomor urut hanya benar bila seluruh langkah memang dipakai.
+                 Pada fokus yang lebih sempit ia berbohong: "6" tanpa 1–5 di
+                 atasnya terbaca sebagai lima langkah yang tertinggal. */
+              showNumber={whole}
+              /* "Opsional untuk jenis karya ini" adalah keterangan, bukan
+                 larangan. Begitu orangnya menyempitkan fokus ke langkah itu,
+                 ia sudah menjawab keterangannya — meredupkan langkah yang baru
+                 saja ia pilih sendiri hanya membuatnya ragu. */
+              dimInactive={whole}
+              groupHeading={
+                whole && (index === 0 || phaseOf(inFocus[index - 1].key).name !== phaseOf(step.key).name)
+                  ? phaseOf(step.key).name
+                  : index === 0
+                    ? "Yang Anda kerjakan"
+                    : null
+              }
+              spine={index < inFocus.length - 1}
+            />
+          ))}
+
+          {outOfFocus.length ? (
+            <>
+              <p className="mt-5 hidden pl-[30px] text-[10px] font-medium uppercase tracking-[0.14em] text-faint md:block">
+                Langkah lain
+              </p>
+              <p className="mb-1 hidden pl-[30px] text-[10.5px] leading-snug text-faint md:block">
+                Tidak terkunci — buka kapan saja bila ternyata dibutuhkan.
+              </p>
+              {outOfFocus.map((step) => (
+                <StepLink
+                  key={step.key}
+                  step={step}
+                  view={view}
+                  done={Boolean(done[step.key])}
+                  onOpen={setView}
+                  showNumber={false}
+                  muted
+                />
+              ))}
+            </>
+          ) : null}
 
           <div className="mt-4 hidden h-px bg-border md:mx-2 md:mb-2 md:block" />
 
@@ -388,6 +389,136 @@ export default function App({
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Satu langkah di sidebar. Bentuknya berubah, tautannya tidak pernah mati. */
+function StepLink({
+  step,
+  view,
+  done,
+  onOpen,
+  showNumber,
+  groupHeading = null,
+  spine = false,
+  muted = false,
+  dimInactive = true,
+}: {
+  step: StepInfo;
+  view: string;
+  done: boolean;
+  onOpen: (key: string) => void;
+  showNumber: boolean;
+  groupHeading?: string | null;
+  spine?: boolean;
+  muted?: boolean;
+  /** Redupkan langkah yang opsional bagi jenis karya ini. */
+  dimInactive?: boolean;
+}) {
+  const current = view === step.key;
+  const stepTint = TINT[phaseOf(step.key).tint];
+
+  return (
+    <>
+      {groupHeading ? (
+        <p className="mt-4 hidden pl-[30px] text-[10px] font-medium uppercase tracking-[0.14em] text-faint first:mt-0 md:block">
+          {groupHeading}
+        </p>
+      ) : null}
+      <button
+        onClick={() => onOpen(step.key)}
+        className={cn(
+          "group relative flex shrink-0 items-start gap-2.5 rounded-lg py-1.5 pl-2 pr-2.5 text-left transition-colors md:w-full",
+          current
+            ? cn(stepTint.soft, "text-foreground")
+            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+          muted && !current && "opacity-60",
+          dimInactive && step.active === false && "opacity-45",
+        )}
+      >
+        {spine ? (
+          <span
+            aria-hidden
+            className={cn(
+              "absolute left-[15px] top-[26px] hidden h-[calc(100%-18px)] w-px md:block",
+              done ? stepTint.bg : "bg-border",
+            )}
+          />
+        ) : null}
+        <span
+          className={cn(
+            "tabular relative z-10 grid size-[18px] shrink-0 translate-y-px place-items-center rounded-full text-[9.5px] font-semibold ring-2 ring-background transition-all",
+            current
+              ? stepTint.solid
+              : done
+                ? cn(stepTint.solid, "opacity-85")
+                : "border border-border-strong bg-card text-faint",
+            muted && "size-[14px] translate-y-[3px]",
+          )}
+        >
+          {done && !current ? (
+            <Check className={cn(muted ? "size-2" : "size-2.5")} strokeWidth={3} />
+          ) : showNumber ? (
+            step.number
+          ) : null}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span
+            className={cn(
+              "block whitespace-nowrap text-[12.5px] leading-snug md:whitespace-normal",
+              current && "font-semibold",
+            )}
+          >
+            {step.title}
+          </span>
+          {step.note && current ? (
+            <span className="hidden text-[10.5px] leading-snug text-faint md:block">
+              {step.note}
+            </span>
+          ) : null}
+        </span>
+      </button>
+    </>
+  );
+}
+
+/**
+ * Pemilih fokus kerja.
+ *
+ * Diletakkan di kepala sidebar karena ia menjelaskan bentuk sidebar itu
+ * sendiri: begitu orang bertanya "kenapa langkahnya cuma empat", jawabannya
+ * ada tepat di atas daftarnya, dan bisa langsung diubah di tempat yang sama.
+ */
+function FocusPicker() {
+  const { catalog, project } = useApp();
+  const { run, refreshProject, toast } = useActions();
+  const presets = catalog?.focus_presets ?? [];
+  if (!project || !presets.length) return null;
+
+  const current = project.focus_key;
+  const known = presets.some((p) => p.key === current);
+
+  return (
+    <div className="mb-3 hidden md:block">
+      <p className="pl-1 text-[10px] font-medium uppercase tracking-[0.14em] text-faint">
+        Fokus kerja
+      </p>
+      <SimpleSelect
+        className="mt-1 h-8 w-full text-[12px]"
+        value={known ? current : ""}
+        placeholder="Pilihan sendiri"
+        onValueChange={(value) => {
+          if (!value) return;
+          void run(async () => {
+            await api.patch(`/projects/${project.id}`, { focus: value });
+            await refreshProject();
+            const preset = presets.find((p) => p.key === value);
+            toast(`Fokus diubah ke ${preset?.label ?? value}.`);
+          });
+        }}
+        options={presets.map((p) => ({ value: p.key, label: p.label }))}
+      />
     </div>
   );
 }

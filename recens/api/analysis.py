@@ -123,7 +123,8 @@ class SampleSizeRequest(BaseModel):
 
 
 class InsertRequest(BaseModel):
-    section_id: int
+    #: Boleh dikosongkan — Recens mencarikan bagian hasilnya sendiri.
+    section_id: int | None = None
     include_narrative: bool = True
 
 
@@ -396,11 +397,16 @@ def insert_analysis(
     disisipkan ke naskah proyek orang lain.
     """
     row = owned_analysis(conn, account["id"], analysis_id)
-    section = owned_section(conn, account["id"], payload.section_id)
-    if section["project_id"] != row["project_id"]:
-        raise HTTPException(
-            400, "Bagian tujuan berada di proyek lain. Sisipkan ke bagian dalam proyek yang sama."
-        )
+    if payload.section_id is None:
+        section_id = _results_section(conn, row["project_id"])
+    else:
+        section = owned_section(conn, account["id"], payload.section_id)
+        if section["project_id"] != row["project_id"]:
+            raise HTTPException(
+                400,
+                "Bagian tujuan berada di proyek lain. Sisipkan ke bagian dalam proyek yang sama.",
+            )
+        section_id = payload.section_id
 
     data = json.loads(row["result_json"])
     result = engine.AnalysisResult(
@@ -426,7 +432,7 @@ def insert_analysis(
     start = db.fetch_one(
         conn,
         "SELECT COALESCE(MAX(position), -1) + 1 AS p FROM blocks WHERE section_id = ?",
-        (payload.section_id,),
+        (section_id,),
     )["p"]
     created = []
     for offset, block in enumerate(blocks):
@@ -434,7 +440,7 @@ def insert_analysis(
             db.insert(
                 conn,
                 "blocks",
-                section_id=payload.section_id,
+                section_id=section_id,
                 position=start + offset,
                 kind=block["kind"],
                 content=block["content"],
@@ -442,7 +448,55 @@ def insert_analysis(
                 updated_at=db.now(),
             )
         )
-    return {"inserted": len(created), "block_ids": created}
+    return {"inserted": len(created), "block_ids": created, "section_id": section_id}
+
+
+def _results_section(conn: sqlite3.Connection, project_id: int) -> int:
+    """Bagian tempat hasil analisis semestinya mendarat.
+
+    Tanpa ini antarmuka menebak dengan mengambil bagian terdaun pertama, dan
+    bagian terdaun pertama sebuah skripsi adalah Latar Belakang. Tabel regresi
+    yang tersisip di latar belakang bukan sekadar salah tempat — mahasiswa yang
+    fokusnya memang hanya BAB IV akan menyimpulkan fiturnya rusak.
+    """
+    row = db.fetch_one(
+        conn,
+        "SELECT id FROM sections WHERE project_id = ? AND role = 'hasil' "
+        "ORDER BY position LIMIT 1",
+        (project_id,),
+    )
+    if row is not None:
+        return int(row["id"])
+
+    row = db.fetch_one(
+        conn,
+        "SELECT id FROM sections WHERE project_id = ? AND LOWER(title) LIKE 'hasil%' "
+        "ORDER BY position LIMIT 1",
+        (project_id,),
+    )
+    if row is not None:
+        return int(row["id"])
+
+    # Proyek yang kerangkanya sudah dirombak sendiri bisa saja tidak punya
+    # bagian hasil sama sekali. Dibuatkan, daripada menolak menyisipkan.
+    position = db.fetch_one(
+        conn,
+        "SELECT COALESCE(MAX(position), -1) + 1 AS p FROM sections "
+        "WHERE project_id = ? AND parent_id IS NULL",
+        (project_id,),
+    )["p"]
+    return db.insert(
+        conn,
+        "sections",
+        project_id=project_id,
+        parent_id=None,
+        position=position,
+        title="Hasil Penelitian",
+        role="hasil",
+        target_words=0,
+        status="draf",
+        created_at=db.now(),
+    )
 
 
 @router.post("/projects/{project_id}/analyses/pasted", status_code=201)

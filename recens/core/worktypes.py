@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Iterable
 
 
 class Family(str, Enum):
@@ -149,6 +150,113 @@ STEP_NOTES: dict[Family, dict[str, str]] = {
         "ekspor_revisi": "Ditambah template jurnal dan berkas submisi.",
     },
 }
+
+
+# --- Fokus kerja -------------------------------------------------------------
+
+#: Delapan langkah adalah *peta*, bukan *rel*.
+#:
+#: Rancangan produk menuliskannya berurutan karena begitulah sebuah tugas akhir
+#: dikerjakan dari nol. Tetapi tidak semua orang datang dari nol. Ada yang
+#: naskahnya sudah jadi dan hanya mentok di BAB IV; ada yang tinggal merapikan
+#: format sebelum menyerahkan; ada yang datang membawa coretan pembimbing.
+#: Bagi mereka, sidebar bernomor satu sampai delapan bukan panduan melainkan
+#: tagihan — tujuh langkah yang tidak mereka butuhkan berdiri sebagai tunggakan
+#: yang tidak akan pernah dicentang.
+#:
+#: Karena itu fokus hanya mengubah *penonjolan*, bukan *ketersediaan*. Tidak ada
+#: satu pun langkah yang dikunci oleh fokus; yang berubah adalah mana yang
+#: berdiri di depan dan apa yang diukur oleh dashboard.
+
+
+@dataclass(frozen=True)
+class Focus:
+    key: str
+    label: str
+    summary: str
+    steps: tuple[str, ...]
+
+
+#: Langkah yang selalu ikut, apa pun fokusnya. Proyek adalah wadahnya; tanpa
+#: itu tidak ada tempat menaruh apa pun.
+FOCUS_ALWAYS: tuple[str, ...] = ("buat_proyek",)
+
+ALL_STEP_KEYS: tuple[str, ...] = tuple(s.key for s in STEPS)
+
+FOCUS_PRESETS: tuple[Focus, ...] = (
+    Focus(
+        "lengkap",
+        "Naskah utuh",
+        "Dari proyek baru sampai naskah siap serah. Seluruh langkah dipakai.",
+        ALL_STEP_KEYS,
+    ),
+    Focus(
+        "olah_data",
+        "Olah data & BAB IV",
+        "Data diolah, hasilnya dibaca menjadi tabel dan narasi, lalu disisipkan "
+        "ke naskah. Cocok bila bab lain sudah ditulis sendiri.",
+        ("olah_data", "menulis", "periksa_naskah", "ekspor_revisi"),
+    ),
+    Focus(
+        "kajian_pustaka",
+        "Kajian pustaka & sitasi",
+        "Pencarian referensi, sitasi dalam teks, dan daftar pustaka yang selalu "
+        "sinkron. Cocok untuk menggarap BAB II.",
+        ("kumpulkan_referensi", "menulis", "periksa_naskah", "ekspor_revisi"),
+    ),
+    Focus(
+        "perapian",
+        "Perapian format & ekspor",
+        "Pedoman kampus dibaca menjadi aturan, naskah diperiksa, lalu diekspor "
+        "sudah terformat penuh. Cocok bila tulisannya sudah selesai.",
+        ("muat_aturan", "periksa_naskah", "ekspor_revisi"),
+    ),
+    Focus(
+        "revisi",
+        "Tindak lanjut bimbingan",
+        "Coretan pembimbing dicatat menjadi daftar tugas, ditindaklanjuti di "
+        "naskah, lalu diekspor ulang.",
+        ("ekspor_revisi", "menulis", "periksa_naskah"),
+    ),
+)
+
+FOCUS_BY_KEY: dict[str, Focus] = {f.key: f for f in FOCUS_PRESETS}
+
+
+def normalize_focus(steps: Iterable[str] | None) -> tuple[str, ...]:
+    """Bersihkan pilihan fokus menjadi daftar langkah yang sah dan berurutan.
+
+    Kosong berarti seluruh langkah — itulah perilaku sebelum fokus ada, dan
+    proyek lama yang tidak punya kolom ini harus tetap terbaca seperti semula.
+    Kunci yang tidak dikenal dibuang tanpa ribut: fokus adalah preferensi
+    tampilan, dan menolak seluruh proyek karena satu kunci usang akan membuat
+    orang kehilangan akses ke naskahnya sendiri.
+    """
+    if steps is None:
+        return ALL_STEP_KEYS
+    if isinstance(steps, str):
+        preset = FOCUS_BY_KEY.get(steps)
+        steps = preset.steps if preset else (steps,)
+
+    chosen = {key for key in steps if key in STEPS_BY_KEY}
+    if not chosen:
+        return ALL_STEP_KEYS
+    chosen.update(FOCUS_ALWAYS)
+    return tuple(key for key in ALL_STEP_KEYS if key in chosen)
+
+
+def focus_key(steps: Iterable[str] | None) -> str:
+    """Nama preset yang cocok dengan pilihan langkah, atau ``sendiri``."""
+    normalized = normalize_focus(steps)
+    for preset in FOCUS_PRESETS:
+        if normalize_focus(preset.steps) == normalized:
+            return preset.key
+    return "sendiri"
+
+
+def focus_label(steps: Iterable[str] | None) -> str:
+    key = focus_key(steps)
+    return FOCUS_BY_KEY[key].label if key in FOCUS_BY_KEY else "Pilihan sendiri"
 
 
 #: Perbedaan perlakuan per kelompok (tabel 2.2).
@@ -568,8 +676,21 @@ def requires_data_step(work_type: WorkType, research_type: ResearchType) -> bool
     return False
 
 
-def applicable_steps(work_type: WorkType, research_type: ResearchType) -> list[dict]:
-    """Daftar delapan langkah beserta status pemakaiannya untuk proyek ini."""
+def applicable_steps(
+    work_type: WorkType,
+    research_type: ResearchType,
+    focus: Iterable[str] | None = None,
+) -> list[dict]:
+    """Daftar delapan langkah beserta status pemakaiannya untuk proyek ini.
+
+    ``focused`` menandai langkah yang benar-benar ingin dikerjakan pengguna.
+    Ia sengaja tidak memengaruhi ``active``: yang di luar fokus tetap terbuka
+    dan tetap berfungsi penuh, hanya berdiri lebih ke belakang. Orang berubah
+    pikiran di tengah jalan — mahasiswa yang tadinya hanya mau mengolah data
+    lalu memutuskan menulis pembahasannya sekalian tidak boleh menabrak pintu
+    terkunci karena pilihan yang ia buat sebulan sebelumnya.
+    """
+    in_focus = set(normalize_focus(focus))
     result = []
     for step in STEPS:
         mode = work_type.steps[step.key]
@@ -585,6 +706,7 @@ def applicable_steps(work_type: WorkType, research_type: ResearchType) -> list[d
                 "summary": step.summary,
                 "mode": mode.value,
                 "active": active,
+                "focused": step.key in in_focus,
                 "note": work_type.step_note(step.key),
             }
         )
