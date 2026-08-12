@@ -1,9 +1,15 @@
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge, DataTable, Progress, StatusBadge } from "@/components/ui/display";
-import { Field, Input } from "@/components/ui/form";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge, Callout, DataTable, Progress, StatusBadge } from "@/components/ui/display";
+import { Field, FileInput, Input } from "@/components/ui/form";
 import { api } from "@/lib/api";
 import { useActions, useApp } from "@/lib/store";
 import { num } from "@/lib/utils";
@@ -59,6 +65,8 @@ export function OutlineView() {
         target jumlah kata tiap bagian.
       </PageHeader>
 
+      <ImportPanel reload={load} />
+
       <Card>
         <CardHeader>
           <CardTitle>
@@ -105,5 +113,89 @@ export function OutlineView() {
         </CardContent>
       </Card>
     </>
+  );
+}
+
+
+/**
+ * Impor naskah yang sudah ditulis sendiri.
+ *
+ * Berdiri di atas kerangka, bukan di bawahnya, karena inilah yang pertama
+ * dicari orang yang datang membawa BAB I sampai III: sebelum ia percaya pada
+ * kerangka bawaan yang belum tentu cocok dengan pedoman kampusnya, ia ingin
+ * tahu apakah tulisannya sendiri bisa masuk.
+ */
+function ImportPanel({ reload }: { reload: () => Promise<void> }) {
+  const { project } = useApp();
+  const { run, refreshProject, toast } = useActions();
+  const { withBusy, isBusy } = useBusy();
+  const fileRef = React.useRef<HTMLInputElement>(null);
+  const [catatan, setCatatan] = React.useState<string[]>([]);
+
+  const impor = (ganti: boolean) =>
+    withBusy("impor", async () => {
+      const file = fileRef.current?.files?.[0];
+      if (!file) return toast("Pilih berkas naskah .docx lebih dahulu.", "error");
+      const form = new FormData();
+      form.append("file", file);
+      form.append("replace", ganti ? "true" : "false");
+      const hasil = await run(() =>
+        api.upload<{ sections_created: number; word_count: number; notes: string[] }>(
+          `/projects/${project!.id}/manuscript/import`,
+          form,
+        ),
+      );
+      if (!hasil) return;
+      setCatatan(hasil.notes);
+      toast(
+        `${hasil.sections_created} bagian terbaca, ${hasil.word_count.toLocaleString("id-ID")} kata masuk ke naskah.`,
+      );
+      await reload();
+      await refreshProject();
+    });
+
+  return (
+    <Card className="mb-3.5">
+      <CardHeader>
+        <CardTitle>Sudah punya naskah sendiri?</CardTitle>
+        <CardDescription>
+          Unggah berkas .docx yang sudah Anda tulis — BAB I sampai III atau seluruhnya. Judul
+          bab dikenali dari penomorannya, jadi naskah yang ditulis mengikuti pedoman kampus
+          tetap terbaca meski tidak memakai gaya Heading di Word.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Row>
+          <Field className="min-w-56 flex-1">
+            <FileInput ref={fileRef} accept=".docx" />
+          </Field>
+          <Button loading={isBusy("impor")} onClick={() => impor(false)}>
+            Impor naskah
+          </Button>
+        </Row>
+
+        {catatan.length ? (
+          <Callout className="mt-3" title="Hasil pembacaan">
+            {catatan.map((baris, index) => (
+              <p key={index} className={index ? "mt-1" : ""}>
+                {baris}
+              </p>
+            ))}
+          </Callout>
+        ) : null}
+
+        <p className="mt-3 text-[11.5px] leading-relaxed text-muted-foreground">
+          Bila naskah proyek ini sudah berisi tulisan, impor akan ditolak lebih dulu — dan bila
+          Anda memang bermaksud menggantinya,{" "}
+          <button
+            className="underline underline-offset-2 hover:text-foreground"
+            onClick={() => impor(true)}
+          >
+            ganti naskah yang ada
+          </button>
+          . Naskah lamanya disimpan sebagai versi dan bisa dipulihkan kapan saja.
+        </p>
+      </CardContent>
+    </Card>
   );
 }

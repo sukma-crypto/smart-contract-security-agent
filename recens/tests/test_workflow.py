@@ -525,3 +525,201 @@ class TestFokusPadaProyek:
         katalog = client.get("/api/catalog").json()
         kunci = {p["key"] for p in katalog["focus_presets"]}
         assert {"lengkap", "olah_data", "kajian_pustaka"} <= kunci
+
+
+def _naskah_kampus(path):
+    """Naskah bergaya pedoman kampus: judul diketik biasa, bukan gaya Heading."""
+    import docx
+
+    document = docx.Document()
+    for baris in [
+        "KATA PENGANTAR",
+        "Puji syukur penulis panjatkan kepada Tuhan Yang Maha Esa.",
+        "BAB I",
+        "PENDAHULUAN",
+        "A. Latar Belakang Masalah",
+        "Kinerja karyawan merupakan faktor penting dalam organisasi modern.",
+        "B. Rumusan Masalah",
+        "Apakah motivasi berpengaruh terhadap kinerja karyawan?",
+        "BAB II KAJIAN PUSTAKA",
+        "2.1 Motivasi Kerja",
+        "Motivasi adalah dorongan yang menggerakkan seseorang untuk bekerja.",
+        "2.1.1 Teori Herzberg",
+        "Herzberg membagi faktor motivasi menjadi dua kelompok besar.",
+        "BAB III METODE PENELITIAN",
+        "Penelitian ini menggunakan pendekatan kuantitatif.",
+    ]:
+        document.add_paragraph(baris)
+    document.save(str(path))
+    return path
+
+
+class TestImporNaskah:
+    """Yang sudah menulis BAB I sampai III tidak mengetik ulang tiga bab."""
+
+    def test_judul_bab_dikenali_tanpa_gaya_heading(self, tmp_path):
+        """Hampir tidak ada mahasiswa yang memakai gaya Heading di Word.
+
+        Judul bab diketik sebagai paragraf biasa lalu ditebalkan sendiri.
+        Pembaca yang hanya mempercayai gaya Word akan menyimpulkan seluruh
+        skripsi terdiri dari satu bagian tanpa judul.
+        """
+        from recens.core.ingest import read_docx_manuscript
+
+        hasil = read_docx_manuscript(_naskah_kampus(tmp_path / "naskah.docx"))
+        judul = [s.title for s in hasil.sections]
+        assert "PENDAHULUAN" in judul
+        assert "KAJIAN PUSTAKA" in judul
+        assert "METODE PENELITIAN" in judul
+
+    def test_bab_dan_namanya_di_baris_terpisah_digabung(self, tmp_path):
+        """"BAB I" dan "PENDAHULUAN" kerap ditulis di dua baris terpisah."""
+        from recens.core.ingest import read_docx_manuscript
+
+        hasil = read_docx_manuscript(_naskah_kampus(tmp_path / "naskah.docx"))
+        assert not any(s.title == "BAB I" for s in hasil.sections)
+
+    def test_penomoran_bawaan_naskah_dilucuti(self, tmp_path):
+        """Recens menomori sendiri, jadi nomor asal akan bertumpuk.
+
+        Dibiarkan, daftar isinya berbunyi "3.1 2.1 Motivasi Kerja" — dua sistem
+        penomoran berebut satu baris.
+        """
+        from recens.core.ingest import read_docx_manuscript
+
+        hasil = read_docx_manuscript(_naskah_kampus(tmp_path / "naskah.docx"))
+        semua = [s.title for s in hasil.flat()]
+        assert "Latar Belakang Masalah" in semua
+        assert "Motivasi Kerja" in semua
+        assert "Teori Herzberg" in semua
+        assert not any(t.startswith(("A.", "B.", "2.1")) for t in semua)
+
+    def test_subbab_huruf_dan_angka_bertingkat(self, tmp_path):
+        from recens.core.ingest import read_docx_manuscript
+
+        hasil = read_docx_manuscript(_naskah_kampus(tmp_path / "naskah.docx"))
+        bab2 = next(s for s in hasil.sections if s.title == "KAJIAN PUSTAKA")
+        assert [c.title for c in bab2.children] == ["Motivasi Kerja"]
+        assert [c.title for c in bab2.children[0].children] == ["Teori Herzberg"]
+
+    def test_impor_mengisi_kerangka_proyek(self, client, project, tmp_path):
+        pid = project["id"]
+        berkas = _naskah_kampus(tmp_path / "naskah.docx")
+        with open(berkas, "rb") as handle:
+            jawaban = client.post(
+                f"/api/projects/{pid}/manuscript/import",
+                files={"file": ("naskah.docx", handle, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+            )
+        assert jawaban.status_code == 201
+        data = jawaban.json()
+        assert data["sections_created"] >= 6
+        assert data["word_count"] > 20
+
+        naskah = client.get(f"/api/projects/{pid}/manuscript").json()
+        assert "Kinerja karyawan merupakan faktor penting" in _all_text(naskah["sections"])
+
+    def test_naskah_berisi_tidak_ditimpa_diam_diam(self, client, project, tmp_path):
+        pid = project["id"]
+        bagian = _section_ids(client, pid)
+        client.post(
+            f"/api/sections/{bagian['Latar Belakang Masalah']}/blocks",
+            json={"content": "Tulisan yang sudah saya kerjakan sendiri."},
+        )
+        berkas = _naskah_kampus(tmp_path / "naskah.docx")
+        with open(berkas, "rb") as handle:
+            ditolak = client.post(
+                f"/api/projects/{pid}/manuscript/import",
+                files={"file": ("naskah.docx", handle, "application/octet-stream")},
+            )
+        assert ditolak.status_code == 409
+        assert "sudah berisi tulisan" in ditolak.json()["detail"]
+
+    def test_penimpaan_yang_disengaja_menyimpan_titik_pulih(self, client, project, tmp_path):
+        pid = project["id"]
+        bagian = _section_ids(client, pid)
+        client.post(
+            f"/api/sections/{bagian['Latar Belakang Masalah']}/blocks",
+            json={"content": "Tulisan lama yang harus bisa dipulihkan."},
+        )
+        berkas = _naskah_kampus(tmp_path / "naskah.docx")
+        with open(berkas, "rb") as handle:
+            jawaban = client.post(
+                f"/api/projects/{pid}/manuscript/import",
+                files={"file": ("naskah.docx", handle, "application/octet-stream")},
+                data={"replace": "true"},
+            )
+        assert jawaban.status_code == 201
+        versi_id = jawaban.json()["restore_version_id"]
+        assert versi_id
+
+        client.post(f"/api/projects/{pid}/versions/{versi_id}/restore")
+        naskah = client.get(f"/api/projects/{pid}/manuscript").json()
+        assert "Tulisan lama yang harus bisa dipulihkan" in _all_text(naskah["sections"])
+
+    def test_format_selain_docx_ditolak_dengan_petunjuk(self, client, project, tmp_path):
+        berkas = tmp_path / "naskah.doc"
+        berkas.write_bytes(b"bukan docx")
+        with open(berkas, "rb") as handle:
+            jawaban = client.post(
+                f"/api/projects/{project['id']}/manuscript/import",
+                files={"file": ("naskah.doc", handle, "application/msword")},
+            )
+        assert jawaban.status_code == 400
+        assert "simpan ulang sebagai .docx" in jawaban.json()["detail"]
+
+
+class TestEksporSebagian:
+    """Yang hanya menggarap satu bab tidak membawa serta bab kosong."""
+
+    def _siapkan(self, client, pid):
+        bagian = _section_ids(client, pid)
+        client.post(
+            f"/api/sections/{bagian['Latar Belakang Masalah']}/blocks",
+            json={"content": "Motivasi kerja diduga memengaruhi kinerja karyawan."},
+        )
+        outline = client.get(f"/api/projects/{pid}/outline").json()
+        return [s for s in outline["sections"] if s["level"] == 1]
+
+    def test_hanya_bab_terpilih_yang_masuk(self, client, project):
+        pid = project["id"]
+        bab = self._siapkan(client, pid)
+        satu = bab[0]
+
+        hasil = client.post(
+            f"/api/projects/{pid}/export",
+            json={"format": "docx", "sections": [satu["id"]]},
+        ).json()
+        assert hasil["partial"] is True
+        assert hasil["sections_exported"] == [satu["title"]]
+
+        with zipfile.ZipFile(hasil["path"]) as arsip:
+            dokumen = arsip.read("word/document.xml").decode("utf-8")
+        assert "Motivasi kerja diduga memengaruhi" in dokumen
+        # Bab lain tidak ikut terbawa.
+        assert bab[-1]["title"] not in dokumen
+
+    def test_tanpa_pilihan_seluruh_naskah_tetap_diekspor(self, client, project):
+        pid = project["id"]
+        bab = self._siapkan(client, pid)
+        hasil = client.post(f"/api/projects/{pid}/export", json={"format": "docx"}).json()
+        assert hasil["partial"] is False
+        assert len(hasil["sections_exported"]) == len(bab)
+
+    def test_bab_milik_proyek_lain_ditolak(self, client, second_client, project):
+        """Nomor bab sembarang tidak boleh menjadi jalan membaca naskah orang."""
+        milik_orang_lain = second_client.post(
+            "/api/projects",
+            json={"name": "Punya Orang Lain", "work_type": "tugas_akhir",
+                  "research_type": "kuantitatif_asosiatif"},
+        ).json()
+        outline = second_client.get(
+            f"/api/projects/{milik_orang_lain['id']}/outline"
+        ).json()
+        asing = next(s for s in outline["sections"] if s["level"] == 1)["id"]
+
+        ditolak = client.post(
+            f"/api/projects/{project['id']}/export",
+            json={"format": "docx", "sections": [asing]},
+        )
+        assert ditolak.status_code == 400
+        assert "bukan bab pada proyek ini" in ditolak.json()["detail"]

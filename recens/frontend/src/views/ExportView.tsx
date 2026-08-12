@@ -15,7 +15,7 @@ import {
 import { Field, FileInput, Input, SimpleSelect, Textarea } from "@/components/ui/form";
 import { api } from "@/lib/api";
 import { flattenSections, useActions, useApp } from "@/lib/store";
-import { num } from "@/lib/utils";
+import { cn, num } from "@/lib/utils";
 import type { Revision, Section } from "@/lib/types";
 import { PageHeader, Row, useBusy } from "@/views/shared";
 
@@ -55,6 +55,8 @@ export function ExportView() {
     faculty: "",
   });
   const [exportInfo, setExportInfo] = React.useState<React.ReactNode>(null);
+  // Kosong berarti seluruh naskah — bawaan yang benar bagi kebanyakan orang.
+  const [babDipilih, setBabDipilih] = React.useState<number[]>([]);
   const [revisions, setRevisions] = React.useState<{
     revisions: Revision[];
     total: number;
@@ -87,7 +89,11 @@ export function ExportView() {
             margins: { top_cm: number; right_cm: number; bottom_cm: number; left_cm: number };
           };
           assumed_rules: string[];
-        }>(`/projects/${project!.id}/export`, { format, meta }),
+        }>(`/projects/${project!.id}/export`, {
+          format,
+          meta,
+          sections: babDipilih.length ? babDipilih : null,
+        }),
       );
       if (!result) return;
       const rules = result.applied_rules;
@@ -158,6 +164,53 @@ export function ExportView() {
                 />
               </Field>
             </Row>
+            {/* Pemilihan bab. Yang menggarap satu bab saja menyerahkan satu
+                bab ke pembimbingnya, dan bab kosong yang ikut terbawa justru
+                terbaca sebagai pekerjaan yang belum jalan. */}
+            {(manuscript?.sections.length ?? 0) > 1 ? (
+              <div className="mt-4">
+                <p className="text-[12.5px] font-medium">Bab yang diekspor</p>
+                <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+                  Biarkan kosong untuk mengekspor seluruh naskah.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {manuscript!.sections.map((bab) => {
+                    const aktif = babDipilih.includes(bab.id);
+                    return (
+                      <button
+                        key={bab.id}
+                        type="button"
+                        onClick={() =>
+                          setBabDipilih((sebelum) =>
+                            aktif
+                              ? sebelum.filter((id) => id !== bab.id)
+                              : [...sebelum, bab.id],
+                          )
+                        }
+                        className={cn(
+                          "rounded-md border px-2.5 py-1 text-[11.5px] transition-colors",
+                          aktif
+                            ? "border-lagoon/50 bg-lagoon/10 font-medium text-foreground"
+                            : "border-border text-muted-foreground hover:border-border-strong hover:text-foreground",
+                        )}
+                      >
+                        {bab.title}
+                      </button>
+                    );
+                  })}
+                  {babDipilih.length ? (
+                    <button
+                      type="button"
+                      onClick={() => setBabDipilih([])}
+                      className="px-1.5 text-[11.5px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                    >
+                      seluruh naskah
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
             <Row className="mt-3">
               {detail.export_formats.map((format) => (
                 <Button

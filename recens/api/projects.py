@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from .. import db
 from ..core import credits
 from ..core.llm.guardrails import describe_limits
+from ..core.ingest import UnsupportedManuscript, read_docx_manuscript
 from ..core.manuscript import (
     build_default_outline,
     load_manuscript,
@@ -40,6 +41,7 @@ from .deps import (
     owned_block,
     owned_section,
     project_work_type,
+    upload_path,
 )
 
 router = APIRouter(tags=["proyek"])
@@ -613,6 +615,117 @@ def restore_version(
     )
     restore_snapshot(conn, project_id, json.loads(row["snapshot_json"]))
     return {"restored": version_id, "word_count": load_manuscript(conn, project_id).word_count}
+
+
+@router.post("/projects/{project_id}/manuscript/import", status_code=201)
+async def import_manuscript(
+    file: UploadFile = File(...),
+    replace: bool = Form(False),
+    conn: sqlite3.Connection = Depends(get_conn),
+    project: dict = Depends(get_project),
+) -> dict:
+    """Impor naskah .docx yang sudah ditulis sendiri menjadi kerangka bernaskah.
+
+    Yang sudah menggarap BAB I sampai III berbulan-bulan lalu mentok di BAB IV
+    tidak boleh diminta mengetik ulang tiga bab hanya untuk memakai satu fitur.
+    Naskahnya masuk apa adanya, dengan strukturnya sendiri — struktur bawaan
+    Recens memang cuma tebakan, sedangkan yang ia bawa sudah disetujui
+    pembimbingnya.
+    """
+    project_id = project["id"]
+    filename = file.filename or "naskah.docx"
+    if not filename.lower().endswith(".docx"):
+        raise HTTPException(
+            400,
+            "Format naskah harus .docx. Bila berkas Anda .doc lama atau PDF, buka di Word "
+            "lalu simpan ulang sebagai .docx.",
+        )
+
+    destination = upload_path(project_id, filename, "naskah")
+    destination.write_bytes(await file.read())
+    try:
+        imported = read_docx_manuscript(destination)
+    except UnsupportedManuscript as exc:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(400, str(exc)) from exc
+
+    current = load_manuscript(conn, project_id)
+    # Naskah yang sudah berisi tidak ditimpa diam-diam. Kerangka bawaan yang
+    # masih kosong boleh diganti tanpa bertanya — tidak ada yang hilang — tetapi
+    # tulisan yang sudah ada adalah pekerjaan orang.
+    if current.word_count and not replace:
+        raise HTTPException(
+            409,
+            "Naskah proyek ini sudah berisi tulisan. Impor akan menggantinya. Ulangi "
+            "dengan pilihan 'ganti naskah yang ada' bila memang itu yang Anda maksud.",
+        )
+
+    versi_id = None
+    if current.word_count:
+        # Titik pulih dibuat lebih dulu, sehingga impor yang ternyata keliru
+        # arah bisa dibatalkan lewat riwayat versi.
+        versi_id = db.insert(
+            conn,
+            "versions",
+            project_id=project_id,
+            label="Sebelum impor naskah",
+            snapshot_json=json.dumps(snapshot(current), ensure_ascii=False),
+            word_count=current.word_count,
+            created_at=db.now(),
+        )
+
+    conn.execute("DELETE FROM sections WHERE project_id = ?", (project_id,))
+    conn.commit()
+
+    dibuat = 0
+
+    def tanam(nodes, parent_id: int | None) -> None:
+        nonlocal dibuat
+        for position, node in enumerate(nodes):
+            section_id = db.insert(
+                conn,
+                "sections",
+                project_id=project_id,
+                parent_id=parent_id,
+                position=position,
+                title=node.title,
+                role=None,
+                target_words=0,
+                status="draf" if node.blocks else "belum",
+                created_at=db.now(),
+            )
+            dibuat += 1
+            for block_position, block in enumerate(node.blocks):
+                db.insert(
+                    conn,
+                    "blocks",
+                    section_id=section_id,
+                    position=block_position,
+                    kind=block.get("kind", "paragraph"),
+                    content=block.get("content", ""),
+                    meta_json=json.dumps(block.get("meta", {}), ensure_ascii=False),
+                    updated_at=db.now(),
+                )
+            tanam(node.children, section_id)
+
+    tanam(imported.sections, None)
+    conn.commit()
+
+    fresh = load_manuscript(conn, project_id)
+    catatan = list(imported.notes)
+    catatan.append(
+        "Bagian hasil analisis akan dibuatkan sendiri saat Anda menyisipkan hasil olah "
+        "data, jadi tidak perlu menyiapkannya lebih dulu."
+    )
+    if versi_id:
+        catatan.append("Naskah sebelumnya disimpan sebagai versi dan bisa dipulihkan.")
+
+    return {
+        "sections_created": dibuat,
+        "word_count": fresh.word_count,
+        "notes": catatan,
+        "restore_version_id": versi_id,
+    }
 
 
 @router.get("/projects/{project_id}/dashboard")

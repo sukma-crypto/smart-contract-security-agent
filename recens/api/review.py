@@ -61,6 +61,8 @@ class ExportRequest(BaseModel):
     meta: dict = Field(default_factory=dict)
     style: str | None = None
     include_front_matter: bool = True
+    #: Id bab yang ikut diekspor. Kosong berarti seluruh naskah.
+    sections: list[int] | None = None
 
 
 class AbstractRequest(BaseModel):
@@ -409,6 +411,25 @@ def export_project(
 
     rules = project_rules(conn, project)
     manuscript = load_manuscript(conn, project_id)
+
+    # Ekspor sebagian. Yang hanya menggarap BAB IV tidak perlu membawa serta
+    # bab-bab kosong hasil kerangka bawaan: yang ia serahkan ke pembimbing
+    # adalah satu bab, dan bab kosong di dalamnya justru terbaca sebagai
+    # pekerjaan yang belum jalan.
+    dipilih = payload.sections
+    if dipilih:
+        tersedia = {s.id for s in manuscript.sections}
+        asing = [i for i in dipilih if i not in tersedia]
+        if asing:
+            raise HTTPException(
+                400,
+                "Bagian yang dipilih untuk diekspor bukan bab pada proyek ini: "
+                f"{', '.join(map(str, asing))}.",
+            )
+        manuscript.sections = [s for s in manuscript.sections if s.id in set(dipilih)]
+        if not manuscript.sections:
+            raise HTTPException(400, "Tidak ada bab yang dipilih untuk diekspor.")
+
     bibliography = build_bibliography(
         conn,
         project_id,
@@ -446,6 +467,8 @@ def export_project(
         "path": str(path),
         "download_url": f"/api/projects/{project_id}/export/download?format={payload.format}",
         "size_bytes": path.stat().st_size,
+        "sections_exported": [s.title for s in manuscript.sections],
+        "partial": bool(dipilih),
         "applied_rules": {
             "page_size": rules.page_size,
             "margins": rules.margins.__dict__,
