@@ -25,17 +25,26 @@ export function PageHeader({
   const tint = tintOf(view);
 
   return (
-    <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+    <div className="mb-9 flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0">
-        <p className={cn("mb-2 flex items-center gap-2 text-[11px] font-medium", tint.text)}>
-          <span aria-hidden className={cn("h-[3px] w-6 rounded-full", tint.bg)} />
+        {/* Fase jadi lencana berlatar, bukan garis kecil. Ia penanda tempat —
+            "saya sekarang di tahap apa" — dan penanda tempat yang terlalu
+            samar sama saja dengan tidak ada. */}
+        <p
+          className={cn(
+            "mb-2.5 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.1em]",
+            tint.soft,
+            tint.text,
+          )}
+        >
+          <span aria-hidden className={cn("size-1.5 rounded-full", tint.bg)} />
           {phase.name}
         </p>
-        <h2 className="font-serif text-[28px] font-semibold leading-tight tracking-tight">
+        <h2 className="font-serif text-[32px] font-semibold leading-[1.12] tracking-[-0.015em]">
           {title}
         </h2>
         {children ? (
-          <p className="mt-2 max-w-[58ch] text-[12.5px] leading-relaxed text-muted-foreground">
+          <p className="mt-2.5 max-w-[62ch] text-[13px] leading-relaxed text-muted-foreground">
             {children}
           </p>
         ) : null}

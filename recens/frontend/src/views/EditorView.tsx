@@ -70,11 +70,13 @@ export function EditorView() {
     : 0;
 
   return (
-    <div className="grid gap-x-10 gap-y-6 lg:grid-cols-[13.5rem_minmax(0,1fr)] xl:grid-cols-[13.5rem_minmax(0,1fr)_16rem]">
+    <div className="grid gap-x-7 gap-y-6 lg:grid-cols-[12rem_minmax(0,1fr)] xl:grid-cols-[12rem_minmax(0,1fr)_14rem]">
       {/* Tulang punggung kerangka */}
       <aside className="lg:sticky lg:top-0 lg:max-h-[calc(100vh-5rem)] lg:self-start">
-        <p className="mb-2 text-[11px] font-semibold text-faint">Kerangka</p>
-        <nav className="scrollbar-slim -ml-px max-h-[70vh] overflow-y-auto border-l border-border">
+        <p className="mb-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
+          Kerangka
+        </p>
+        <nav className="scrollbar-slim -ml-px max-h-[72vh] overflow-y-auto border-l border-border">
           {flat.map((section) => {
             const current = section.id === active?.id;
             const written = section.word_count > 0;
@@ -82,17 +84,28 @@ export function EditorView() {
               <button
                 key={section.id}
                 onClick={() => setSectionId(section.id)}
-                style={{ paddingLeft: `${12 + (section.level - 1) * 11}px` }}
+                style={{ paddingLeft: `${13 + (section.level - 1) * 12}px` }}
                 className={cn(
-                  "-ml-px flex w-full items-baseline gap-2 border-l-2 py-1 pr-1 text-left transition-colors",
+                  "-ml-px flex w-full items-baseline gap-2 border-l-2 py-[5px] pr-1.5 text-left transition-all",
                   current
-                    ? "border-primary font-semibold text-foreground"
+                    ? "border-violet bg-violet/8 text-foreground"
                     : written
-                      ? "border-transparent text-muted-foreground hover:border-border-strong"
-                      : "border-transparent text-faint hover:border-border-strong",
+                      ? "border-transparent text-muted-foreground hover:border-border-strong hover:bg-muted/50"
+                      : "border-transparent text-faint hover:border-border-strong hover:bg-muted/40",
                 )}
               >
-                <span className="min-w-0 flex-1 truncate text-[12px] leading-snug">
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 truncate leading-snug",
+                    // Bab berdiri lebih tegas daripada sub-babnya. Tanpa beda
+                    // ini, kerangka enam belas baris terbaca sebagai satu
+                    // daftar rata dan orang kehilangan tempatnya.
+                    section.level === 1
+                      ? "text-[12.5px] font-semibold"
+                      : "text-[12px] font-normal",
+                    current && "font-semibold",
+                  )}
+                >
                   <span className="tabular mr-1.5 text-[10.5px] text-faint">{section.number}</span>
                   {section.title}
                 </span>
@@ -113,10 +126,12 @@ export function EditorView() {
           sendiri, sehingga terbaca sebagai halaman yang sedang digarap, bukan
           sebagai kolom teks yang menempel pada latar. */}
       <div className="min-w-0">
-        <div className="sheet px-7 py-8 sm:px-10 sm:py-10">
-          <header className="measure mb-7">
-            <p className="tabular text-[11px] font-medium text-violet">{active?.number}</p>
-            <h2 className="mt-1 font-serif text-[27px] font-semibold leading-tight">
+        <div className="page min-h-[calc(100vh-9rem)] px-7 py-9 sm:px-12 sm:py-12">
+          <header className="measure page-margin mb-8 ml-0 sm:ml-7">
+            <p className="tabular text-[11px] font-medium tracking-wide text-violet">
+              {active?.number}
+            </p>
+            <h2 className="mt-1.5 font-serif text-[30px] font-semibold leading-[1.15] tracking-[-0.01em]">
               {active?.title ?? "Tidak ada bagian"}
             </h2>
             <div className="mt-3 flex items-center gap-3">
@@ -136,14 +151,25 @@ export function EditorView() {
             </div>
           </header>
 
-          <div className="measure">
+          <div className="measure ml-0 sm:ml-7">
           {!active?.blocks.length ? (
             <>
+              {/* Halaman kosong adalah momen paling berat menulis skripsi.
+                  Kotak putus-putus memperlakukannya sebagai kolom yang belum
+                  diisi; yang dibutuhkan orangnya adalah undangan, dan tempat
+                  meletakkan kalimat pertama yang sudah terlihat seperti
+                  naskah. */}
               <button
                 onClick={() => addBlock("paragraph")}
-                className="w-full rounded-md border border-dashed border-border py-10 text-center text-[12.5px] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
+                className="group block w-full rounded-lg py-8 text-left transition-colors hover:bg-muted/40"
               >
-                Bagian ini masih kosong — klik untuk mulai menulis.
+                <span className="prose-manuscript block text-faint transition-colors group-hover:text-muted-foreground">
+                  Mulai menulis {active?.title?.toLowerCase() ?? "bagian ini"}…
+                  <span className="ml-0.5 inline-block h-[1.05em] w-px translate-y-[0.16em] bg-violet animate-caret" />
+                </span>
+                <span className="mt-3 block text-[11.5px] text-faint">
+                  Klik di mana saja pada baris ini untuk membuat paragraf pertama.
+                </span>
               </button>
               {/* Hanya saat bagiannya benar-benar kosong. Begitu ada satu
                   paragraf, kutipannya hilang: yang berkedip di sebelah naskah
@@ -164,7 +190,13 @@ export function EditorView() {
 
       {/* Rel kanan: sitasi dan hasil bantuan menulis */}
       <aside className="min-w-0 xl:sticky xl:top-0 xl:self-start">
-        <p className="mb-2 text-[11px] font-semibold text-faint">Sitasi</p>
+        <p className="mb-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
+          Sitasi
+        </p>
+        {/* Diberi wadah, bukan dibiarkan mengambang. Dua kendali telanjang di
+            tepi bidang lebar terbaca sebagai sisa tata letak, bukan sebagai
+            perkakas yang memang ditaruh di sana. */}
+        <div className="sheet p-3">
         <SimpleSelect
           className="w-full"
           value=""
@@ -188,19 +220,27 @@ export function EditorView() {
         </p>
 
         {manuscript?.citekeys.length ? (
-          <div className="mt-3 flex flex-wrap gap-1">
-            {manuscript.citekeys.map((key) => (
-              <Badge key={key} variant="mono">
-                {key}
-              </Badge>
-            ))}
+          <div className="mt-3 border-t border-border pt-3">
+            <p className="mb-1.5 text-[10.5px] text-faint">
+              Terpakai di naskah ({manuscript.citekeys.length})
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {manuscript.citekeys.map((key) => (
+                <Badge key={key} variant="mono">
+                  {key}
+                </Badge>
+              ))}
+            </div>
           </div>
         ) : null}
+        </div>
 
         {aside ? (
           <div className="mt-6">
             <div className="mb-2 flex items-baseline justify-between">
-              <p className="text-[11px] font-semibold text-faint">Hasil bantuan</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
+                Hasil bantuan
+              </p>
               <button
                 onClick={() => setAside(null)}
                 className="text-faint transition-colors hover:text-foreground"

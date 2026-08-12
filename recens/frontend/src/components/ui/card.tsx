@@ -15,7 +15,14 @@ const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElemen
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn("sheet", className)}
+      /* Naik sedikit saat disentuh. Bukan hiasan: pada halaman berisi enam
+         kartu, gerak sekecil ini yang memberi tahu mana yang sedang ditunjuk
+         tanpa perlu garis sorot yang meramaikan bidang. */
+      className={cn(
+        "sheet transition-shadow duration-200",
+        "hover:shadow-[0_1px_2px_hsl(30_20%_20%/0.05),0_14px_34px_-16px_hsl(30_24%_18%/0.26)]",
+        className,
+      )}
       {...props}
     />
   ),
@@ -24,14 +31,21 @@ Card.displayName = "Card";
 
 const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn("flex flex-col gap-1 px-5 pb-3 pt-4", className)} {...props} />
+    <div ref={ref} className={cn("flex flex-col gap-1 px-6 pb-3.5 pt-5", className)} {...props} />
   ),
 );
 CardHeader.displayName = "CardHeader";
 
 const CardTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttributes<HTMLHeadingElement>>(
   ({ className, ...props }, ref) => (
-    <h3 ref={ref} className={cn("text-[15px] font-semibold leading-snug", className)} {...props} />
+    <h3
+      ref={ref}
+      className={cn(
+        "font-serif text-[17px] font-semibold leading-snug tracking-[-0.005em]",
+        className,
+      )}
+      {...props}
+    />
   ),
 );
 CardTitle.displayName = "CardTitle";
@@ -50,7 +64,7 @@ CardDescription.displayName = "CardDescription";
 
 const CardContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn("px-5 pb-5", className)} {...props} />
+    <div ref={ref} className={cn("px-6 pb-6", className)} {...props} />
   ),
 );
 CardContent.displayName = "CardContent";
@@ -75,7 +89,7 @@ export function Section({
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3 border-b border-border pb-2">
           <div className="min-w-0">
             {title ? (
-              <h3 className="flex items-baseline gap-2 text-[15px] font-semibold leading-snug">
+              <h3 className="flex items-baseline gap-2 font-serif text-[17px] font-semibold leading-snug tracking-[-0.005em]">
                 <span aria-hidden className="h-3 w-[3px] shrink-0 translate-y-px rounded-full bg-lagoon/70" />
                 {title}
               </h3>

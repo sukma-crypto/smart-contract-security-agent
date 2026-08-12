@@ -337,7 +337,7 @@ export default function App({
         {/* Panel kerja sebagai lembar yang terangkat dari mejanya, dengan
             satu garis warna fase di tepi atas — penanda diam yang mengingatkan
             di tahap mana orang sedang bekerja tanpa perlu dibaca. */}
-        <main className="scrollbar-slim relative min-w-0 flex-1 overflow-y-auto rounded-tl-2xl border-l border-t border-border bg-paper px-6 pb-24 pt-8 shadow-[-8px_-8px_28px_-20px_rgba(30,25,20,0.25)] md:px-10">
+        <main className="deskwork scrollbar-slim relative min-w-0 flex-1 overflow-y-auto rounded-tl-2xl border-l border-t border-border px-6 pb-24 pt-8 shadow-[-8px_-8px_28px_-20px_rgba(30,25,20,0.25)] md:px-10">
           <span
             aria-hidden
             className={cn(

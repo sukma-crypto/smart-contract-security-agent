@@ -34,6 +34,9 @@
     --destructive: 4 52% 40%;
     --warning: 30 58% 34%;
     --success: 148 36% 28%;
+
+    /* Garis margin naskah — sewarna tinta merah pudar pada kertas jilid. */
+    --clay-rule: 14 48% 62% / 0.32;
   }
 
   .dark {
@@ -57,6 +60,7 @@
     --destructive: 4 60% 66%;
     --warning: 34 62% 62%;
     --success: 148 34% 60%;
+    --clay-rule: 14 40% 56% / 0.28;
   }
 }
 
@@ -163,6 +167,26 @@
     linear-gradient(168deg, hsl(30 10% 12%) 0%, hsl(30 9% 8%) 100%);
 }
 
+/* Permukaan panel kerja.
+   Versi sebelumnya memakai satu warna rata, sehingga gradasi meja hanya
+   terlihat di sisi sidebar dan area terbesar layar justru jadi bidang krem
+   datar. Yang dipakai sekarang: kehangatan yang menepi ke sudut, sehingga
+   tengah layar tetap tenang untuk membaca sementara tepinya tidak mati. */
+@utility deskwork {
+  background-color: hsl(var(--paper));
+  background-image:
+    radial-gradient(70% 46% at 102% -4%, hsl(34 78% 74% / 0.5) 0%, transparent 60%),
+    radial-gradient(60% 50% at -4% 104%, hsl(176 46% 72% / 0.42) 0%, transparent 62%),
+    radial-gradient(52% 38% at 96% 104%, hsl(258 48% 78% / 0.3) 0%, transparent 64%);
+}
+
+.dark .deskwork {
+  background-image:
+    radial-gradient(64% 40% at 100% 0%, hsl(34 52% 42% / 0.2) 0%, transparent 58%),
+    radial-gradient(56% 44% at 0% 100%, hsl(176 40% 40% / 0.2) 0%, transparent 60%),
+    radial-gradient(46% 32% at 92% 100%, hsl(258 40% 46% / 0.16) 0%, transparent 62%);
+}
+
 /* Lembar kertas yang benar-benar terangkat, bukan kotak bergaris. */
 @utility sheet {
   background-color: hsl(var(--card));
@@ -177,6 +201,71 @@
   box-shadow:
     0 1px 2px hsl(0 0% 0% / 0.3),
     0 8px 24px -12px hsl(0 0% 0% / 0.5);
+}
+
+/* --- Halaman naskah --------------------------------------------------------
+   Bedanya dengan ``sheet`` bukan gaya melainkan makna: ``sheet`` adalah kartu
+   perkakas, sedangkan ini adalah halaman yang sedang digarap orangnya. Karena
+   itu ia setinggi layar dan tidak pernah berakhir di tengah — halaman naskah
+   yang menggantung dengan ruang kosong di bawahnya terbaca sebagai kolom teks
+   yang menempel di latar, bukan sebagai kertas.
+
+   Tumpukan di belakangnya bukan hiasan: ia mengabarkan bahwa yang sedang
+   dibuka satu bagian dari naskah yang lebih panjang. */
+@utility page {
+  position: relative;
+  background-color: hsl(var(--card));
+  border-radius: calc(var(--radius) + 6px);
+  border: 1px solid hsl(var(--border));
+  box-shadow:
+    0 1px 2px hsl(30 20% 20% / 0.05),
+    0 2px 6px -2px hsl(30 20% 20% / 0.06),
+    0 24px 48px -28px hsl(30 24% 18% / 0.28);
+}
+
+/* Dua lembar samar di belakangnya. */
+.page::before,
+.page::after {
+  content: "";
+  position: absolute;
+  inset-inline: 10px;
+  bottom: -5px;
+  height: 14px;
+  z-index: -1;
+  border-radius: inherit;
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+}
+.page::after {
+  inset-inline: 20px;
+  bottom: -10px;
+  opacity: 0.7;
+}
+
+.dark .page {
+  box-shadow:
+    0 1px 2px hsl(0 0% 0% / 0.32),
+    0 24px 48px -28px hsl(0 0% 0% / 0.6);
+}
+
+/* Garis margin kiri, seperti pada naskah yang dijilid. Tipis sekali: ia
+   penanda tepi kerja, bukan garis yang ikut dibaca. */
+@utility page-margin {
+  position: relative;
+}
+.page-margin::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: -1.75rem;
+  width: 1px;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    hsl(var(--clay-rule)) 12%,
+    hsl(var(--clay-rule)) 88%,
+    transparent 100%
+  );
 }
 
 /* Butiran halus supaya bidang lebar tidak terasa seperti plastik. */

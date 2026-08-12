@@ -268,7 +268,7 @@ export function DataTable({
               {columns.map((column, index) => (
                 <th
                   key={index}
-                  className="whitespace-nowrap border-b border-border-strong px-2.5 pb-1.5 pt-0 text-left text-[11px] font-semibold text-muted-foreground first:pl-0"
+                  className="whitespace-nowrap border-b border-border-strong px-3 pb-2 pt-0 text-left text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground first:pl-0"
                 >
                   {column}
                 </th>
@@ -286,10 +286,17 @@ export function DataTable({
                 </td>
               </tr>
             ) : (
+              // Baris diberi nafas dan sorot saat disentuh. Tabel hasil
+              // statistik dibaca menyilang — mata menyusuri satu baris dari
+              // kolom pertama sampai terakhir — dan tanpa sorot, baris yang
+              // sedang dibaca gampang lompat pada tabel dua belas kolom.
               rows.map((row, rowIndex) => (
-                <tr key={rowIndex} className="border-b border-border last:border-0">
+                <tr
+                  key={rowIndex}
+                  className="border-b border-border transition-colors last:border-0 hover:bg-muted/60"
+                >
                   {row.map((cell, cellIndex) => (
-                    <td key={cellIndex} className="px-2.5 py-1.5 align-top first:pl-0">
+                    <td key={cellIndex} className="px-3 py-2 align-top first:pl-0">
                       {cell}
                     </td>
                   ))}
