@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from .. import db
 from ..core.citations.library import entries_by_citekey
 from ..core.llm import services
+from ..core.llm.router import Billing
 from ..core.llm.guardrails import describe_limits
 from ..core.manuscript import (
     create_sections_from_template,
@@ -74,6 +75,7 @@ def continue_sentence(
         section_title=section_title,
         work_type_label=work_type.label,
         citekeys=citekeys,
+        billing=Billing.dari_proyek(conn, project),
     )
     if result.text:
         charge_for(conn, project, "lanjutan_kalimat")
@@ -87,7 +89,12 @@ def paraphrase(
     project: dict = Depends(get_project),
 ) -> dict:
     """Parafrase disertai penjelasan alasan perubahan."""
-    result = guard(services.paraphrase, payload.text, payload.instruction)
+    result = guard(
+        services.paraphrase,
+        payload.text,
+        payload.instruction,
+        billing=Billing.dari_proyek(conn, project),
+    )
     if result.source == "model":
         charge_for(conn, project, "parafrase")
     return result.to_dict()
@@ -100,7 +107,7 @@ def academic_language(
     project: dict = Depends(get_project),
 ) -> dict:
     """Penyuntingan sesuai kaidah PUEBI/EYD."""
-    result = services.academic_language(payload.text)
+    result = services.academic_language(payload.text, billing=Billing.dari_proyek(conn, project))
     if result.source == "model":
         charge_for(conn, project, "bahasa_akademik")
     return result.to_dict()

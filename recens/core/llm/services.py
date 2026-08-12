@@ -23,6 +23,7 @@ from . import prompts
 from .base import LLMUnavailable
 from .guardrails import GuardrailError, Verdict, guard_output, guard_request, word_budget
 from .providers import get_provider
+from .router import Billing, BudgetExceeded, route
 
 
 @dataclass
@@ -41,11 +42,25 @@ class ServiceResult:
         }
 
 
-def _call(system: str, user: str, max_tokens: int = 900, fast: bool = False, temperature=0.3):
-    provider = get_provider()
-    return provider.complete(
-        system=system, user=user, max_tokens=max_tokens, temperature=temperature, fast=fast
-    )
+def _call(task: str, system: str, user: str, temperature=0.3, billing: Billing | None = None):
+    """Satu-satunya jalan menuju model.
+
+    Batas keluaran tidak lagi datang dari pemanggil melainkan dari katalog
+    tugas. Sebelumnya tiap tempat memilih ``max_tokens`` sendiri, dan angka yang
+    dipilih di satu tempat tidak pernah ditinjau ulang dari tempat lain —
+    sehingga pagar belanja tersebar di dua belas keputusan yang tidak saling
+    tahu. Sekarang pagar itu satu daftar yang bisa dibaca sekali duduk.
+
+    Pagar anggaran yang tersentuh dijadikan ``LLMUnavailable`` supaya seluruh
+    pemanggil menanganinya lewat jalur yang sudah ada: turun ke jalur
+    deterministik, bukan gagal ke muka pengguna. Kehabisan anggaran bukan
+    kerusakan; ia keadaan yang memang direncanakan.
+    """
+    try:
+        hasil = route(task, system, user, temperature=temperature, billing=billing)
+    except BudgetExceeded as exc:
+        raise LLMUnavailable(str(exc)) from exc
+    return hasil.completion
 
 
 # --- Penulisan & bahasa ------------------------------------------------------
@@ -56,6 +71,7 @@ def continue_sentence(
     section_title: str = "",
     work_type_label: str = "",
     citekeys: set[str] | None = None,
+    billing: Billing | None = None,
 ) -> ServiceResult:
     """Lanjutan kalimat: menghapus kebuntuan halaman kosong."""
     verdict = guard_request(context, kind="lanjutan_kalimat")
@@ -71,7 +87,7 @@ def continue_sentence(
         f"Teks sejauh ini:\n{context}\n\nLanjutkan:"
     )
     try:
-        completion = _call(system, user, max_tokens=300, fast=True, temperature=0.4)
+        completion = _call("lanjutan_kalimat", system, user, temperature=0.4, billing=billing)
     except LLMUnavailable as exc:
         return ServiceResult(
             text="",
@@ -95,7 +111,7 @@ def continue_sentence(
     )
 
 
-def paraphrase(text: str, instruction: str = "") -> ServiceResult:
+def paraphrase(text: str, instruction: str = "", billing: Billing | None = None) -> ServiceResult:
     """Parafrase yang selalu disertai penjelasan alasan perubahan."""
     verdict = guard_request(f"{instruction} {text}", kind="parafrase")
     if not verdict.allowed:
@@ -107,7 +123,7 @@ def paraphrase(text: str, instruction: str = "") -> ServiceResult:
         user += f"\n\nPermintaan tambahan pengguna: {instruction}"
 
     try:
-        completion = _call(system, user, max_tokens=700, fast=True, temperature=0.5)
+        completion = _call("parafrase", system, user, temperature=0.5, billing=billing)
     except LLMUnavailable:
         return ServiceResult(
             text=_normalize_academic(text),
@@ -137,14 +153,14 @@ def paraphrase(text: str, instruction: str = "") -> ServiceResult:
     )
 
 
-def academic_language(text: str) -> ServiceResult:
+def academic_language(text: str, billing: Billing | None = None) -> ServiceResult:
     """Penyuntingan sesuai kaidah PUEBI/EYD."""
     findings = [f.to_dict() for f in check_text(text)]
     system = prompts.render(prompts.ACADEMIC_LANGUAGE)
     user = f"Teks:\n{text}"
 
     try:
-        completion = _call(system, user, max_tokens=1200, fast=True, temperature=0.2)
+        completion = _call("bahasa_akademik", system, user, temperature=0.2, billing=billing)
     except LLMUnavailable:
         return ServiceResult(
             text=_normalize_academic(text),
@@ -371,7 +387,7 @@ def section_template(role: str) -> dict:
 # --- Referensi & riset -------------------------------------------------------
 
 
-def ask_journal(question: str, hits: list[Hit]) -> ServiceResult:
+def ask_journal(question: str, hits: list[Hit], billing: Billing | None = None) -> ServiceResult:
     """Tanya Jurnal — jawaban selalu disertai penunjuk halaman sumber."""
     if not hits:
         return ServiceResult(
@@ -392,7 +408,7 @@ def ask_journal(question: str, hits: list[Hit]) -> ServiceResult:
 
     sources = [hit.as_dict() for hit in hits]
     try:
-        completion = _call(system, user, max_tokens=900)
+        completion = _call("tanya_jurnal", system, user, billing=billing)
     except LLMUnavailable:
         return ServiceResult(
             text="",
@@ -412,7 +428,7 @@ def ask_journal(question: str, hits: list[Hit]) -> ServiceResult:
     )
 
 
-def synthesis_row(reference: dict, hits: list[Hit]) -> dict:
+def synthesis_row(reference: dict, hits: list[Hit], billing: Billing | None = None) -> dict:
     """Satu baris matriks sintesis untuk satu artikel."""
     entry = reference.get("csl_json", {})
     from ..citations.styles import authors, family_name, title_of
@@ -440,7 +456,7 @@ def synthesis_row(reference: dict, hits: list[Hit]) -> dict:
     system = prompts.render(prompts.SYNTHESIS)
     user = f"Artikel: {base['judul']}\n\nKutipan sumber:\n{format_evidence(hits)}"
     try:
-        completion = _call(system, user, max_tokens=700)
+        completion = _call("matriks_sintesis", system, user, billing=billing)
         payload = _extract_json(completion.text)
         if isinstance(payload, dict):
             base.update({k: v for k, v in payload.items() if k in base})
@@ -455,7 +471,7 @@ def synthesis_row(reference: dict, hits: list[Hit]) -> dict:
 # --- Analisis ----------------------------------------------------------------
 
 
-def narrative_for_analysis(result: AnalysisResult, context: str = "") -> ServiceResult:
+def narrative_for_analysis(result: AnalysisResult, context: str = "", billing: Billing | None = None) -> ServiceResult:
     """Susun narasi pembahasan di atas angka yang sudah dihitung mesin statistik.
 
     Bila narasi model memuat angka yang tidak ada di hasil perhitungan, narasi
@@ -471,7 +487,7 @@ def narrative_for_analysis(result: AnalysisResult, context: str = "") -> Service
     )
 
     try:
-        completion = _call(system, user, max_tokens=1200)
+        completion = _call("narasi_hasil", system, user, billing=billing)
     except LLMUnavailable:
         return ServiceResult(
             text=fallback,
@@ -482,6 +498,35 @@ def narrative_for_analysis(result: AnalysisResult, context: str = "") -> Service
     text, verdict = guard_output(
         completion.text, kind="narasi_hasil", analysis_result=result
     )
+
+    # Naik satu tingkat, sekali saja, bila penjaga menolak.
+    #
+    # Inilah cara menekan biaya tanpa menurunkan mutu: sebagian besar narasi
+    # lolos di jenjang murah, dan hanya yang benar-benar gagal yang dibayar
+    # mahal. Kebalikannya — semuanya di jenjang mahal supaya aman — membayar
+    # penuh untuk pekerjaan yang model murah sudah sanggup.
+    #
+    # Sekali saja, dan hanya karena penolakannya berarti sesuatu: angkanya
+    # diperiksa mesin, bukan dinilai perasaan. Tanpa batas itu, satu hasil
+    # analisis yang aneh bisa memanggil model termahal berkali-kali.
+    if not verdict.allowed:
+        try:
+            naik = route(
+                "narasi_hasil", system, user, billing=billing, escalated=True
+            ).completion
+        except (LLMUnavailable, BudgetExceeded):
+            naik = None
+        if naik is not None:
+            text_naik, verdict_naik = guard_output(
+                naik.text, kind="narasi_hasil", analysis_result=result
+            )
+            if verdict_naik.allowed:
+                return ServiceResult(
+                    text=text_naik,
+                    verdict=verdict_naik,
+                    meta={"model": naik.model, "naik_tingkat": True},
+                )
+
     if not verdict.allowed:
         return ServiceResult(
             text=fallback,
@@ -502,7 +547,7 @@ def narrative_for_analysis(result: AnalysisResult, context: str = "") -> Service
 # --- Sidang & publikasi ------------------------------------------------------
 
 
-def defense_questions(manuscript: Manuscript, weak_points: list[dict]) -> ServiceResult:
+def defense_questions(manuscript: Manuscript, weak_points: list[dict], billing: Billing | None = None) -> ServiceResult:
     """Mode siap sidang: menyusun kemungkinan pertanyaan penguji."""
     deterministic = _rule_based_defense_questions(manuscript, weak_points)
     system = prompts.render(prompts.DEFENSE)
@@ -513,7 +558,7 @@ def defense_questions(manuscript: Manuscript, weak_points: list[dict]) -> Servic
         f"Naskah:\n{excerpt}"
     )
     try:
-        completion = _call(system, user, max_tokens=2000)
+        completion = _call("mode_sidang", system, user, billing=billing)
         payload = _extract_json(completion.text)
         questions = payload if isinstance(payload, list) else deterministic
     except (LLMUnavailable, ValueError):
@@ -595,13 +640,13 @@ def _rule_based_defense_questions(manuscript: Manuscript, weak_points: list[dict
     return questions
 
 
-def cover_letter(meta: dict) -> ServiceResult:
+def cover_letter(meta: dict, billing: Billing | None = None) -> ServiceResult:
     """Surat pengantar ke editor — berkas wajib yang jarang diajarkan."""
     deterministic = _cover_letter_template(meta)
     system = prompts.render(prompts.COVER_LETTER)
     user = json.dumps(meta, ensure_ascii=False, indent=2)
     try:
-        completion = _call(system, user, max_tokens=1200)
+        completion = _call("cover_letter", system, user, billing=billing)
     except LLMUnavailable:
         return ServiceResult(text=deterministic, source="deterministik")
     text, verdict = guard_output(completion.text, kind="cover_letter")
@@ -636,7 +681,7 @@ Hormat kami,
 """
 
 
-def reviewer_response(comments: list[dict], meta: dict | None = None) -> ServiceResult:
+def reviewer_response(comments: list[dict], meta: dict | None = None, billing: Billing | None = None) -> ServiceResult:
     """Tanggapan poin per poin — tahap yang menentukan diterima tidaknya artikel."""
     deterministic = _reviewer_response_template(comments)
     system = prompts.render(prompts.REVIEWER_RESPONSE)
@@ -644,7 +689,7 @@ def reviewer_response(comments: list[dict], meta: dict | None = None) -> Service
         {"komentar": comments, "konteks": meta or {}}, ensure_ascii=False, indent=2
     )
     try:
-        completion = _call(system, user, max_tokens=2000)
+        completion = _call("respon_reviewer", system, user, billing=billing)
     except LLMUnavailable:
         return ServiceResult(text=deterministic, source="deterministik")
     text, verdict = guard_output(completion.text, kind="respon_reviewer")
@@ -673,6 +718,7 @@ def structured_abstract(
     manuscript: Manuscript,
     sections: list[str] | None = None,
     max_words: int = 250,
+    billing: Billing | None = None,
 ) -> ServiceResult:
     """Abstrak terstruktur sesuai pola yang diminta jurnal."""
     sections = sections or ["Tujuan", "Metode", "Hasil", "Simpulan"]
@@ -689,7 +735,7 @@ def structured_abstract(
         f"Isi naskah per bagian:\n{json.dumps(role_text, ensure_ascii=False)[:14000]}"
     )
     try:
-        completion = _call(system, user, max_tokens=900)
+        completion = _call("abstrak_terstruktur", system, user, billing=billing)
     except LLMUnavailable:
         return ServiceResult(text=deterministic, source="deterministik")
 
@@ -718,7 +764,8 @@ def _abstract_skeleton(manuscript: Manuscript, sections: list[str], max_words: i
 
 
 def translate(
-    text: str, direction: str = "id-en", field_of_study: str | None = None
+    text: str, direction: str = "id-en", field_of_study: str | None = None,
+    billing: Billing | None = None,
 ) -> ServiceResult:
     """Penerjemahan dwibahasa dengan konsistensi istilah teknis dijaga glosarium.
 
@@ -733,7 +780,7 @@ def translate(
     user = f"Arah terjemahan: {arah}\n\n{hint}\n\nTeks:\n{text}"
 
     try:
-        completion = _call(system, user, max_tokens=1400, temperature=0.2)
+        completion = _call("terjemahan", system, user, temperature=0.2, billing=billing)
     except LLMUnavailable:
         from ..glossary import apply_glossary
 
@@ -773,7 +820,8 @@ def translate(
 
 
 def condense_section(
-    text: str, section_name: str, budget_words: int, source_section: str = ""
+    text: str, section_name: str, budget_words: int, source_section: str = "",
+    billing: Billing | None = None,
 ) -> ServiceResult:
     """Padatkan satu bagian tugas akhir menjadi bagian artikel."""
     verdict = guard_request(text, kind="konversi")
@@ -787,7 +835,7 @@ def condense_section(
         f"Anggaran kata: {budget_words}\n\nTeks sumber:\n{text}"
     )
     try:
-        completion = _call(system, user, max_tokens=min(budget_words * 3, 3000))
+        completion = _call("konversi_naskah", system, user, billing=billing)
     except LLMUnavailable:
         return ServiceResult(
             text="",

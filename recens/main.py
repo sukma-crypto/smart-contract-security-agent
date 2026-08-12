@@ -13,7 +13,9 @@ from . import __version__, db
 from .api import analysis, auth, billing, library, projects, publication, review, writing
 from .config import get_settings
 from .core.citations.sources import OFFICIAL_SOURCES
+from .core.llm.catalog import TASKS, Tier
 from .core.llm.providers import get_provider
+from .core.llm.router import candidates_for
 
 WEB_DIR = Path(__file__).parent / "web"
 
@@ -53,6 +55,14 @@ for router in (
     app.include_router(router, prefix="/api")
 
 
+#: Satu tugas mewakili tiap jenjang, dipakai memperlihatkan hasil perutean.
+_CONTOH_TUGAS = {
+    Tier.RINGAN: TASKS["lanjutan_kalimat"],
+    Tier.SEDANG: TASKS["outline"],
+    Tier.BERAT: TASKS["mode_sidang"],
+}
+
+
 @app.get("/api/health", tags=["sistem"])
 def health() -> dict:
     """Keadaan sistem, termasuk layanan mana yang aktif dan mana yang belum."""
@@ -64,8 +74,17 @@ def health() -> dict:
         "language_model": {
             "available": provider.available,
             "provider": provider.name,
-            "long_context_model": settings.long_context_model if provider.available else None,
-            "fast_model": settings.fast_model if provider.available else None,
+            "providers": settings.llm_keys,
+            # Jenjang beserta model yang benar-benar akan dipakai hari ini,
+            # supaya keputusan perutean bisa diperiksa tanpa membaca kode.
+            "tiers": {
+                tier.value: [m.key for m in candidates_for(task)]
+                for tier, task in _CONTOH_TUGAS.items()
+            },
+            "budget": {
+                "harian_usd": round(settings.budget_daily_cents / 100, 2),
+                "bulanan_usd": round(settings.budget_monthly_cents / 100, 2),
+            },
             "note": (
                 "Tanpa kunci API, fitur penyusunan kalimat memakai jalur deterministik. "
                 "Perhitungan statistik, pemeriksaan naskah, perenderan sitasi, dan "

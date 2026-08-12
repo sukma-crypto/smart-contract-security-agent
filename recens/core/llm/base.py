@@ -14,8 +14,13 @@ class LLMUnavailable(RuntimeError):
 class Completion:
     text: str
     model: str
+    provider: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
+    #: Biaya panggilan ini dalam mikro-dolar, diisi perute setelah menghitung.
+    cost_micros: int = 0
+    #: Benar bila masukannya dipotong agar muat anggaran token.
+    truncated: bool = False
 
     @property
     def total_tokens(self) -> int:
@@ -31,7 +36,7 @@ class Provider(Protocol):
         self,
         system: str,
         user: str,
+        model_id: str = "",
         max_tokens: int = 1024,
         temperature: float = 0.3,
-        fast: bool = False,
     ) -> Completion: ...

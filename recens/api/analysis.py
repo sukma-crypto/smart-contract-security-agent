@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from .. import db
 from ..core.llm import services
+from ..core.llm.router import Billing
 from ..core.stats import engine, methodology, narrative, qualitative, readers, translate
 from .deps import (
     charge_for,
@@ -294,7 +295,9 @@ def run_analysis(
     verdict = None
     if payload.narrate:
         service_result = services.narrative_for_analysis(
-            result, context=project.get("field_of_study") or ""
+            result,
+            context=project.get("field_of_study") or "",
+            billing=Billing.dari_proyek(conn, project),
         )
         narrative_text = service_result.text
         narrative_source = service_result.source

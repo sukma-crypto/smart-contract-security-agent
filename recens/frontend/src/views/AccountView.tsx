@@ -42,6 +42,7 @@ export function AccountView() {
 
       <div className="space-y-9">
         <PlanPanel />
+        <UsagePanel />
         <ProfilePanel onSaved={refresh} onToast={toast} />
         <PasswordPanel onToast={toast} onChanged={loadSessions} />
         <SessionsPanel sessions={sessions} onChanged={loadSessions} onToast={toast} />
@@ -438,6 +439,119 @@ function DangerPanel({
               Batal
             </Button>
           </Row>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+
+interface Usage {
+  hari_ini_usd: number;
+  bulan_ini_usd: number;
+  batas_harian_usd: number;
+  batas_bulanan_usd: number;
+  sisa_harian_usd: number | null;
+  sisa_bulanan_usd: number | null;
+  per_model: {
+    provider: string;
+    model: string;
+    panggilan: number;
+    token_masuk: number;
+    token_keluar: number;
+    biaya_usd: number;
+  }[];
+  per_tugas: { task: string; panggilan: number; biaya_usd: number }[];
+  panggilan_gagal_bulan_ini: number;
+}
+
+/**
+ * Pemakaian model dan sisa pagar anggaran.
+ *
+ * Ditampilkan ke pengguna, bukan disimpan untuk pengelola saja. Biaya yang
+ * hanya tercatat di basis data adalah biaya yang tidak seorang pun periksa
+ * sampai tagihannya datang; yang terlihat tiap kali orang membuka halaman
+ * akunnya adalah biaya yang ketahuan pada hari ia mulai membengkak.
+ */
+function UsagePanel() {
+  const { run } = useActions();
+  const [data, setData] = React.useState<Usage | null>(null);
+
+  React.useEffect(() => {
+    void run(async () => setData(await api.get<Usage>("/account/usage")));
+  }, [run]);
+
+  if (!data) return null;
+  const belum = data.per_model.length === 0;
+
+  return (
+    <Section
+      title="Pemakaian model bahasa"
+      description="Recens memilih model termurah yang sanggup mengerjakan tiap tugas. Angka di bawah adalah biaya sebenarnya, bukan taksiran."
+    >
+      <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          { label: "hari ini", nilai: data.hari_ini_usd, batas: data.batas_harian_usd },
+          { label: "bulan ini", nilai: data.bulan_ini_usd, batas: data.batas_bulanan_usd },
+        ].map((baris) => (
+          <div key={baris.label}>
+            <p className="tabular font-serif text-[25px] font-semibold leading-none">
+              ${baris.nilai.toFixed(3)}
+            </p>
+            <p className="mt-1.5 text-[12.5px] font-medium">Terpakai {baris.label}</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              {baris.batas > 0 ? `dari batas $${baris.batas.toFixed(2)}` : "tanpa batas"}
+            </p>
+          </div>
+        ))}
+        <div>
+          <p className="tabular font-serif text-[25px] font-semibold leading-none">
+            {data.per_model.reduce((jumlah, m) => jumlah + m.panggilan, 0)}
+          </p>
+          <p className="mt-1.5 text-[12.5px] font-medium">Panggilan bulan ini</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {data.panggilan_gagal_bulan_ini} di antaranya gagal atau ditolak
+          </p>
+        </div>
+      </div>
+
+      {belum ? (
+        <Callout className="mt-4" title="Belum ada pemakaian tercatat">
+          Perhitungan statistik, pemeriksaan naskah, sitasi, dan ekspor berjalan lokal dan
+          tidak pernah menagih biaya API sama sekali.
+        </Callout>
+      ) : (
+        <div className="mt-5 grid gap-6 lg:grid-cols-2">
+          <div>
+            <p className="mb-2 text-[12.5px] font-medium">Per model</p>
+            <div className="space-y-1.5">
+              {data.per_model.map((m) => (
+                <div key={m.model} className="flex items-baseline justify-between gap-3">
+                  <span className="text-[12px]">
+                    {m.model}
+                    <span className="text-faint"> · {m.panggilan}×</span>
+                  </span>
+                  <span className="tabular text-[12px]">${m.biaya_usd.toFixed(4)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            {/* Yang bisa ditindaklanjuti adalah "narasi hasil menghabiskan
+                separuh anggaran", bukan "bulan ini habis dua dolar". */}
+            <p className="mb-2 text-[12.5px] font-medium">Per jenis pekerjaan</p>
+            <div className="space-y-1.5">
+              {data.per_tugas.slice(0, 8).map((t) => (
+                <div key={t.task} className="flex items-baseline justify-between gap-3">
+                  <span className="text-[12px]">
+                    {t.task.replace(/_/g, " ")}
+                    <span className="text-faint"> · {t.panggilan}×</span>
+                  </span>
+                  <span className="tabular text-[12px]">${t.biaya_usd.toFixed(4)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </Section>

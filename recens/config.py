@@ -31,14 +31,26 @@ class Settings:
     data_dir: Path = field(default_factory=_default_data_dir)
 
     # --- Model AI (Bagian 7.1) ---------------------------------------------
-    # Model konteks panjang: menalar atas naskah utuh.
-    anthropic_api_key: str = field(default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", ""))
-    long_context_model: str = field(
-        default_factory=lambda: os.environ.get("RECENS_LONG_CONTEXT_MODEL", "claude-opus-5")
+    # Tiga penyedia dipakai berdampingan agar biaya mengikuti berat pekerjaan.
+    # Penjenjangan tugasnya ada di core/llm/catalog.py.
+    deepseek_api_key: str = field(default_factory=lambda: os.environ.get("DEEPSEEK_API_KEY", ""))
+    deepseek_base_url: str = field(
+        default_factory=lambda: os.environ.get(
+            "DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"
+        )
     )
-    # Model cepat: tugas bervolume tinggi dengan tuntutan latensi rendah.
-    fast_model: str = field(
-        default_factory=lambda: os.environ.get("RECENS_FAST_MODEL", "claude-sonnet-5")
+    openai_api_key: str = field(default_factory=lambda: os.environ.get("OPENAI_API_KEY", ""))
+    anthropic_api_key: str = field(default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", ""))
+
+    # --- Pagar anggaran API -------------------------------------------------
+    # Batas belanja per akun, dalam sen dolar. Diperiksa sebelum memanggil,
+    # bukan sesudah: pagar yang baru menyala setelah uangnya keluar bukan pagar.
+    # Nol berarti tanpa batas — sengaja bukan bawaan.
+    budget_daily_cents: int = field(
+        default_factory=lambda: int(os.environ.get("RECENS_BUDGET_DAILY_CENTS", "200"))
+    )
+    budget_monthly_cents: int = field(
+        default_factory=lambda: int(os.environ.get("RECENS_BUDGET_MONTHLY_CENTS", "2000"))
     )
 
     # --- Literatur & sitasi (Bagian 7.1) -----------------------------------
@@ -75,7 +87,15 @@ class Settings:
 
     @property
     def has_llm(self) -> bool:
-        return bool(self.anthropic_api_key)
+        return bool(self.deepseek_api_key or self.openai_api_key or self.anthropic_api_key)
+
+    @property
+    def llm_keys(self) -> dict[str, bool]:
+        return {
+            "deepseek": bool(self.deepseek_api_key),
+            "openai": bool(self.openai_api_key),
+            "anthropic": bool(self.anthropic_api_key),
+        }
 
     def ensure_dirs(self) -> None:
         for path in (self.data_dir, self.uploads_dir, self.exports_dir):

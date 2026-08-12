@@ -20,6 +20,7 @@ from ..core.guidelines import (
     update_ruleset,
 )
 from ..core.llm import services
+from ..core.llm.router import Billing
 from ..core.manuscript import load_manuscript
 from .deps import (
     charge_for,
@@ -334,7 +335,7 @@ def ask_journal(
     )
     if hits:
         charge_for(conn, project, "tanya_jurnal")
-    result = services.ask_journal(payload.question, hits)
+    result = services.ask_journal(payload.question, hits, billing=Billing.dari_proyek(conn, project))
     return result.to_dict()
 
 
@@ -361,7 +362,7 @@ def synthesis_matrix(
         )
         if hits:
             charge_for(conn, project, "matriks_sintesis")
-        rows.append(services.synthesis_row(reference, hits))
+        rows.append(services.synthesis_row(reference, hits, billing=Billing.dari_proyek(conn, project)))
 
     return {
         "columns": ["penulis", "tahun", "judul", "teori", "metode", "sampel", "temuan", "celah"],

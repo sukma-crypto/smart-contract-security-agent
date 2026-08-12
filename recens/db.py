@@ -62,6 +62,29 @@ CREATE TABLE IF NOT EXISTS projects (
     updated_at     TEXT NOT NULL
 );
 
+-- Catatan tiap panggilan model bahasa: siapa, tugas apa, model mana, dan
+-- berapa biayanya. Panggilan yang gagal ikut dicatat — ia tetap sudah dibayar,
+-- dan pola kegagalan yang mahal hanya terlihat bila tercatat.
+CREATE TABLE IF NOT EXISTS llm_calls (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id    INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+    project_id    INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    task          TEXT NOT NULL,
+    provider      TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    input_tokens  INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    -- Mikro-dolar, bilangan bulat: biaya dijumlahkan ribuan kali dan galat
+    -- pembulatan pecahan biner akan menumpuk diam-diam.
+    cost_micros   INTEGER NOT NULL DEFAULT 0,
+    outcome       TEXT NOT NULL DEFAULT 'berhasil',
+    detail        TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_calls_akun_waktu
+    ON llm_calls(account_id, created_at);
+
 -- Langkah 2: pedoman yang dibaca menjadi aturan yang mengikat seluruh keluaran.
 CREATE TABLE IF NOT EXISTS rulesets (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

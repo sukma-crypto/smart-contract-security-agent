@@ -18,6 +18,7 @@ from ..core.citations.library import build_bibliography
 from ..core.exporters import EXPORTERS
 from ..core.guidelines import active_ruleset
 from ..core.llm import services
+from ..core.llm.router import Billing
 from ..core.manuscript import load_manuscript
 from .deps import (
     charge_for,
@@ -375,7 +376,7 @@ def defense_mode(
         for warning in data.get("warnings", []):
             weak_points.append({"severity": "tinggi", "message": warning})
 
-    result = services.defense_questions(manuscript, weak_points)
+    result = services.defense_questions(manuscript, weak_points, billing=Billing.dari_proyek(conn, project))
     if result.source == "model":
         charge_for(conn, project, "mode_sidang")
     return {
@@ -510,7 +511,7 @@ def structured_abstract(
     project: dict = Depends(get_project),
 ) -> dict:
     manuscript = load_manuscript(conn, project["id"])
-    result = services.structured_abstract(manuscript, payload.sections, payload.max_words)
+    result = services.structured_abstract(manuscript, payload.sections, payload.max_words, billing=Billing.dari_proyek(conn, project))
     if result.source == "model":
         charge_for(conn, project, "abstrak_terstruktur")
     return result.to_dict()
@@ -524,7 +525,7 @@ def cover_letter(
 ) -> dict:
     project_id = project["id"]
     meta = {**payload.model_dump(), "title": project["name"]}
-    result = services.cover_letter(meta)
+    result = services.cover_letter(meta, billing=Billing.dari_proyek(conn, project))
     if result.source == "model":
         charge_for(conn, project, "cover_letter")
     db.insert(
@@ -547,7 +548,7 @@ def reviewer_response(
     project: dict = Depends(get_project),
 ) -> dict:
     project_id = project["id"]
-    result = services.reviewer_response(payload.comments)
+    result = services.reviewer_response(payload.comments, billing=Billing.dari_proyek(conn, project))
     if result.source == "model":
         charge_for(conn, project, "respon_reviewer")
 

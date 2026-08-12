@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from .. import db
 from ..core import conversion, glossary, journals
 from ..core.llm import services
+from ..core.llm.router import Billing
 from ..core.manuscript import load_manuscript
 from .deps import charge_for, get_conn, get_project, guard, project_work_type
 
@@ -116,6 +117,7 @@ def condense(
         payload.section_name,
         payload.budget_words,
         payload.source_section,
+        billing=Billing.dari_proyek(conn, project),
     )
     if result.source == "model":
         charge_for(conn, project, "konversi_naskah")
@@ -199,7 +201,10 @@ def translate(
     if payload.direction not in ("id-en", "en-id"):
         raise HTTPException(400, "Arah terjemahan harus 'id-en' atau 'en-id'.")
     result = services.translate(
-        payload.text, direction=payload.direction, field_of_study=project.get("field_of_study")
+        payload.text,
+        direction=payload.direction,
+        field_of_study=project.get("field_of_study"),
+        billing=Billing.dari_proyek(conn, project),
     )
     if result.source == "model":
         charge_for(conn, project, "terjemahan")
