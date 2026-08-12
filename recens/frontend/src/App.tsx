@@ -211,10 +211,45 @@ export default function App({
           </span>
         </button>
 
+        {/* Identitas karya yang sedang digarap. Sebelumnya header hanya berisi
+            nama produk lalu ruang kosong sampai ke pemilih proyek — padahal
+            yang ingin dilihat orang yang membuka layar ini bukan nama
+            produknya, melainkan nama karyanya sendiri dan seberapa jauh ia
+            sudah berjalan. */}
+        {project ? (
+          <div className="ml-4 hidden min-w-0 items-center gap-2 xl:flex">
+            <span aria-hidden className="h-4 w-px bg-border" />
+            {/* Bukan nama proyeknya — itu sudah tertulis di pemilih proyek di
+                kanan, dan menuliskannya dua kali pada satu baris membuat
+                keduanya terbaca sebagai dua hal berbeda. Yang ditaruh di sini
+                justru yang tidak muncul di sana. */}
+            <span
+              className={cn(
+                "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
+                tint.soft,
+                tint.text,
+              )}
+            >
+              {project.work_type_label}
+            </span>
+            {project.deadline ? (
+              <span className="tabular shrink-0 text-[10.5px] text-faint">
+                sidang {new Date(project.deadline).toLocaleDateString("id-ID", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="flex-1" />
+
         {/* Jumlah kata selalu terlihat. Yang membuat orang bertahan menulis
             berbulan-bulan adalah melihat angkanya bergerak. */}
         {showWords ? (
-          <div className="ml-4 hidden items-center gap-2.5 lg:flex">
+          <div className="mr-1 hidden items-center gap-2.5 lg:flex">
             <div className="h-1.5 w-24 overflow-hidden rounded-full bg-border">
               <div
                 className={cn("h-full rounded-full transition-all duration-700", tint.bg)}
@@ -227,8 +262,6 @@ export default function App({
             </span>
           </div>
         ) : null}
-
-        <div className="flex-1" />
         <SimpleSelect
           className="h-8 w-[min(19rem,44vw)] border-transparent bg-transparent hover:border-input"
           value={project ? String(project.id) : ""}
@@ -236,14 +269,26 @@ export default function App({
           onValueChange={(value) => (value ? openProject(Number(value)) : closeProject())}
           options={projects.map((p) => ({ value: String(p.id), label: p.name }))}
         />
+        {/* Model yang benar-benar akan dipakai untuk pekerjaan sehari-hari —
+            jenjang ringan, sebab itulah yang berjalan paling sering. Kolom ini
+            sempat menampilkan `fast_model`, medan yang berhenti dikirim sejak
+            perutean tiga model, sehingga yang tertulis di layar adalah
+            "undefined". */}
         <span
           title={llm?.note}
           className={cn(
-            "hidden text-[11px] md:inline",
-            llm?.available ? "text-success" : "text-faint",
+            "hidden items-center gap-1.5 rounded-full px-2 py-1 text-[10.5px] font-medium md:inline-flex",
+            llm?.available ? "bg-success/10 text-success" : "bg-muted text-faint",
           )}
         >
-          {llm?.available ? llm.fast_model : "jalur deterministik"}
+          <span
+            aria-hidden
+            className={cn(
+              "size-1.5 rounded-full",
+              llm?.available ? "bg-success" : "bg-faint",
+            )}
+          />
+          {llm?.available ? (llm.tiers?.ringan?.[0] ?? "model aktif") : "jalur deterministik"}
         </span>
         <button
           onClick={toggle}

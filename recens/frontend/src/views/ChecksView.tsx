@@ -2,7 +2,7 @@ import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import { Section } from "@/components/ui/card";
-import { Badge, Callout, DataTable, Empty, Finding, StatLine } from "@/components/ui/display";
+import { Badge, Callout, DataTable, Finding, StatLine } from "@/components/ui/display";
 import { api } from "@/lib/api";
 import { useActions, useApp } from "@/lib/store";
 import { cn, num } from "@/lib/utils";
@@ -108,7 +108,7 @@ export function ChecksView() {
       </PageHeader>
 
       {!data ? (
-        <Empty>Belum ada pemeriksaan dijalankan.</Empty>
+        <BelumDiperiksa />
       ) : (
         <Results data={data} />
       )}
@@ -315,3 +315,84 @@ function Results({ data }: { data: ChecksResponse }) {
     </div>
   );
 }
+
+
+/**
+ * Keadaan sebelum pemeriksaan pertama dijalankan.
+ *
+ * Satu baris "Belum ada pemeriksaan dijalankan" di atas layar yang kosong
+ * sebenarnya menyembunyikan hal yang paling ingin diketahui orangnya: apa
+ * yang akan diperiksa. Tanpa itu, tombol "Jalankan pemeriksaan" adalah ajakan
+ * membeli kucing dalam karung — dan mahasiswa yang naskahnya dipertaruhkan
+ * tidak menekan tombol yang tidak ia mengerti.
+ *
+ * Jadi ruang kosongnya diisi daftar apa yang akan dikerjakan, bukan hiasan.
+ */
+function BelumDiperiksa() {
+  return (
+    <>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {PEMERIKSAAN.map((item) => (
+          <div
+            key={item.kind}
+            className="sheet flex flex-col gap-2 p-4 transition-shadow hover:shadow-[0_1px_2px_hsl(30_20%_20%/0.05),0_14px_34px_-16px_hsl(30_24%_18%/0.26)]"
+          >
+            <span
+              aria-hidden
+              className={cn("h-[3px] w-8 rounded-full", item.warna)}
+            />
+            <p className="font-serif text-[16px] font-semibold leading-snug">{item.judul}</p>
+            <p className="text-[12px] leading-relaxed text-muted-foreground">{item.isi}</p>
+            <p className="mt-auto pt-1 text-[11px] leading-relaxed text-faint">
+              Menangkap: {item.contoh}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <Callout className="mt-5" title="Seluruhnya berjalan di komputer ini">
+        Kelima pemeriksaan tidak memanggil model bahasa dan tidak menagih kredit. Naskah Anda
+        tidak dikirim ke mana pun untuk diperiksa.
+      </Callout>
+    </>
+  );
+}
+
+/** Kelima pemeriksaan, dijelaskan dengan contoh yang benar-benar ditangkapnya. */
+const PEMERIKSAAN = [
+  {
+    kind: "konsistensi",
+    judul: "Keselarasan bab",
+    warna: "bg-lagoon",
+    isi: "Rumusan masalah, tujuan, hipotesis, dan simpulan dibandingkan satu per satu.",
+    contoh: "rumusan masalah nomor 3 yang tidak pernah dijawab di simpulan.",
+  },
+  {
+    kind: "sitasi",
+    judul: "Silang sitasi",
+    warna: "bg-violet",
+    isi: "Tiap sitasi dalam teks dicocokkan dengan daftar pustaka, dan sebaliknya.",
+    contoh: "pustaka yang tercantum tetapi tidak pernah dikutip di naskah.",
+  },
+  {
+    kind: "bahasa",
+    judul: "Kaidah PUEBI",
+    warna: "bg-amber",
+    isi: "Ejaan, bentuk tidak baku, dan ragam percakapan yang lolos ke naskah ilmiah.",
+    contoh: '"analisa", "dimana" sebagai penghubung, "produktifitas".',
+  },
+  {
+    kind: "kemiripan",
+    judul: "Indikasi kemiripan",
+    warna: "bg-clay",
+    isi: "Kemiripan antarbagian naskah sendiri dan terhadap kutipan yang tersimpan.",
+    contoh: "paragraf yang tersalin dua kali di bab berbeda.",
+  },
+  {
+    kind: "batas",
+    judul: "Batas pedoman",
+    warna: "bg-lagoon",
+    isi: "Jumlah kata, panjang abstrak, dan bagian wajib menurut pedoman yang aktif.",
+    contoh: "abstrak 320 kata pada pedoman yang membatasi 250.",
+  },
+] as const;

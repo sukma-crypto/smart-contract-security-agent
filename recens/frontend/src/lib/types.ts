@@ -254,7 +254,11 @@ export interface Health {
   language_model: {
     available: boolean;
     provider: string;
-    fast_model: string | null;
+    /** Penyedia mana yang kuncinya benar-benar terpasang. */
+    providers: Record<string, boolean>;
+    /** Model yang akan dipakai tiap jenjang hari ini, termurah lebih dulu. */
+    tiers: Record<string, string[]>;
+    budget: { harian_usd: number; bulanan_usd: number };
     note: string;
   };
   network: boolean;
