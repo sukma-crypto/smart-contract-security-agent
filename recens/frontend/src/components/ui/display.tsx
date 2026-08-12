@@ -220,7 +220,15 @@ export const TabsList = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <TabsPrimitive.List
     ref={ref}
-    className={cn("flex flex-wrap items-center gap-5 border-b border-border", className)}
+    /* Menggulir mendatar di layar sempit, tidak membungkus. Lima tab yang
+       membungkus jadi tiga baris memakan seperempat layar ponsel dan tepinya
+       jadi ragged — sementara menggulir adalah gerakan yang memang sudah
+       dikenal orang pada baris tab. */
+    className={cn(
+      "scrollbar-slim flex items-center gap-5 overflow-x-auto border-b border-border",
+      "[-webkit-overflow-scrolling:touch]",
+      className,
+    )}
     {...props}
   />
 ));
@@ -233,7 +241,7 @@ export const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "-mb-px border-b-2 border-transparent pb-2 text-[13px] text-muted-foreground transition-colors hover:text-foreground data-[state=active]:border-primary data-[state=active]:font-semibold data-[state=active]:text-foreground",
+      "-mb-px shrink-0 whitespace-nowrap border-b-2 border-transparent pb-2 text-[13px] text-muted-foreground transition-colors hover:text-foreground data-[state=active]:border-primary data-[state=active]:font-semibold data-[state=active]:text-foreground",
       className,
     )}
     {...props}

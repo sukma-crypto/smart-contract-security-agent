@@ -463,6 +463,16 @@ function StepLink({
 }) {
   const current = view === step.key;
   const stepTint = TINT[phaseOf(step.key).tint];
+  const ref = React.useRef<HTMLButtonElement>(null);
+
+  // Di ponsel sidebar menjadi strip mendatar, dan langkah yang sedang dibuka
+  // kerap berada di luar layar — terpotong di tepi kiri atau kanan. Digulirkan
+  // ke tengah supaya orang selalu melihat di mana ia berada.
+  React.useEffect(() => {
+    if (!current || !ref.current) return;
+    if (window.matchMedia("(min-width: 768px)").matches) return;
+    ref.current.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }, [current]);
 
   return (
     <>
@@ -472,6 +482,7 @@ function StepLink({
         </p>
       ) : null}
       <button
+        ref={ref}
         onClick={() => onOpen(step.key)}
         className={cn(
           "group relative flex shrink-0 items-start gap-2.5 rounded-lg py-1.5 pl-2 pr-2.5 text-left transition-colors md:w-full",

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Check, Plus, Quote, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, Plus, Quote, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge, Callout, DataTable, Finding } from "@/components/ui/display";
@@ -65,25 +65,59 @@ export function EditorView() {
       await refreshProject();
     });
 
+  // Terbuka di layar lebar lewat kelas, tertutup di ponsel lewat keadaan ini.
+  const [outlineOpen, setOutlineOpen] = React.useState(false);
   const progress = active?.target_words
     ? Math.min((active.word_count / active.target_words) * 100, 100)
     : 0;
 
   return (
     <div className="grid gap-x-7 gap-y-6 lg:grid-cols-[12rem_minmax(0,1fr)] xl:grid-cols-[12rem_minmax(0,1fr)_14rem]">
-      {/* Tulang punggung kerangka */}
+      {/* Tulang punggung kerangka.
+
+          Di layar sempit ia terlipat. Sebelumnya seluruh kerangka — enam belas
+          baris pada skripsi sungguhan — berdiri di atas naskah, sehingga tiap
+          kali membuka editor dari ponsel orang harus menggulir melewati
+          seluruh daftar bab dulu sebelum sampai ke kalimat yang sedang ia
+          tulis. Yang dibuka orang adalah naskahnya, bukan daftar isinya. */}
       <aside className="lg:sticky lg:top-0 lg:max-h-[calc(100vh-5rem)] lg:self-start">
-        <p className="mb-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
+        <button
+          onClick={() => setOutlineOpen((buka) => !buka)}
+          aria-expanded={outlineOpen}
+          className="sheet mb-2.5 flex w-full items-center gap-2 px-3 py-2 text-left lg:hidden"
+        >
+          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
+            Kerangka
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">
+            {active?.number} {active?.title}
+          </span>
+          <ChevronDown
+            className={cn(
+              "size-4 shrink-0 text-faint transition-transform",
+              outlineOpen && "rotate-180",
+            )}
+          />
+        </button>
+        <p className="mb-2.5 hidden text-[10px] font-semibold uppercase tracking-[0.14em] text-faint lg:block">
           Kerangka
         </p>
-        <nav className="scrollbar-slim -ml-px max-h-[72vh] overflow-y-auto border-l border-border">
+        <nav
+          className={cn(
+            "scrollbar-slim -ml-px max-h-[72vh] overflow-y-auto border-l border-border lg:block",
+            outlineOpen ? "block" : "hidden",
+          )}
+        >
           {flat.map((section) => {
             const current = section.id === active?.id;
             const written = section.word_count > 0;
             return (
               <button
                 key={section.id}
-                onClick={() => setSectionId(section.id)}
+                onClick={() => {
+                  setSectionId(section.id);
+                  setOutlineOpen(false);
+                }}
                 style={{ paddingLeft: `${13 + (section.level - 1) * 12}px` }}
                 className={cn(
                   "-ml-px flex w-full items-baseline gap-2 border-l-2 py-[5px] pr-1.5 text-left transition-all",

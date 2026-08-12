@@ -328,7 +328,11 @@ def _assemble(title: str, lines: list[list[str]], notes: list[str], decimal: str
     while len(columns) < width:
         columns.append("")
     columns = columns[:width]
-    columns = [strip_footnote_letter(c) or f"Kolom {i + 1}" for i, c in enumerate(columns)]
+    # Kolom tanpa nama dibiarkan tanpa nama. SPSS sendiri menampilkannya
+    # kosong — kolom yang memuat nama variabel pada tabel Coefficients memang
+    # tidak berjudul — dan nama pengganti seperti "Kolom 2" ikut tercetak di
+    # tabel BAB IV mahasiswa, tempat ia tidak punya arti apa pun.
+    columns = [strip_footnote_letter(c) for c in columns]
 
     rows: list[list[Any]] = []
     for line in body:
